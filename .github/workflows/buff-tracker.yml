@@ -2,9 +2,9 @@ name: Run Buff Knife Tracker
 
 on:
   schedule:
-    - cron: '0 0 * * *'   # 12:00 AM UTC
-    - cron: '0 12 * * *'   # 12:00 PM UTC
-  workflow_dispatch:      # Allows manual trigger
+    - cron: '0 0 * * *'     # Runs at 12:00 AM UTC
+    - cron: '0 12 * * *'    # Runs at 12:00 PM UTC
+  workflow_dispatch:        # Allows manual run via GitHub UI
 
 jobs:
   run-tracker:
@@ -19,7 +19,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Upgrade pip and install dependencies (if requirements.txt exists)
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then
@@ -28,6 +28,9 @@ jobs:
             echo "No requirements.txt found, skipping install."
           fi
 
+      - name: Write credentials.json from GitHub secret
+        run: |
+          echo "${{ secrets.GOOGLE_CREDENTIALS_JSON }}" > credentials.json
+
       - name: Run the Buff tracker
         run: python main.py
-
