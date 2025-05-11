@@ -27,7 +27,7 @@ LOG_SHEET_NAME = "HistoryLog"
 
 # === Google Sheets Setup ===
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_name("C:/Users/NHAT/OneDrive/Desktop/buff 163/Buff163_Price_Tracker/credentials.json", scope)
+creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
 client = gspread.authorize(creds)
 
 try:
