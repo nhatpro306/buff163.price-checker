@@ -28,9 +28,9 @@ jobs:
             echo "No requirements.txt found, skipping install."
           fi
 
-      - name: Write credentials.json from GitHub secret
-        run: |
-          echo "${{ secrets.GOOGLE_CREDENTIALS_JSON }}" > credentials.json
+      - name: Write credentials to file
+  run: echo "${{ secrets.GSHEET_CREDS }}" > credentials.json
+
 
       - name: Run the Buff tracker
         run: python main.py
