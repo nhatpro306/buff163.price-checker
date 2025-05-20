@@ -29,8 +29,7 @@ jobs:
           fi
 
       - name: Write credentials to file
-  run: echo "${{ secrets.GSHEET_CREDS }}" > credentials.json
-
+        run: echo '${{ secrets.GSHEET_CREDS }}' > credentials.json
 
       - name: Run the Buff tracker
         run: python main.py
