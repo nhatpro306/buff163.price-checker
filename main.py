@@ -11,10 +11,26 @@ SKINS = [
         "condition": "Field-Tested"
     },
     {
+        "goods_id": "42555",
+        "name": "Butterfly | Doppler ",
+        "condition": "Factory New"
+    },
+    {
+        "goods_id": "42998",
+        "name": "Karambit | Doppler",
+        "condition": "Factory New"
+    },
+    {
         "goods_id": "42533",
         "name": "Butterfly | Blue Steel",
         "condition": "Field-Tested"
     },
+    {
+        "goods_id": "83578",
+        "name": "Gloves | Nocts",
+        "condition": "Field-Tested"
+    },
+    
     {
         "goods_id": "42587",
         "name": "Butterfly | Tiger Tooth",
