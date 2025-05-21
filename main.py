@@ -88,7 +88,7 @@ else:
     print("⚠️ No data to log.")
 
 # === Dashboard Setup ===
-DASHBOARD_SHEET_NAME = "BuffKhttps://docs.google.com/spreadsheets/u/1/?authuser=1&usp=sheets_webnifeTracker"
+DASHBOARD_SHEET_NAME = "Dashboard"
 
 try:
     dashboard_sheet = client.open(SHEET_NAME).worksheet(DASHBOARD_SHEET_NAME)
@@ -98,12 +98,11 @@ except:
     dashboard_sheet.append_row(["Skin Name", "Latest Price (¥)", "Price Trend", "Sell Listings", "Average Price (¥)", "Price Change %"])
 
 # === Update Dashboard ===
-# === Update Dashboard ===
 def update_dashboard(log_rows):
     all_logs = log_sheet.get_all_values()
     skin_names = {skin['name']: [] for skin in SKINS}
 
-    for row in all_logs[1:]:  # Skip header
+    for row in all_logs[1:]:
         skin_name = row[2]
         price_str = row[4]
         if price_str:
@@ -111,37 +110,29 @@ def update_dashboard(log_rows):
             try:
                 price = float(price_str)
             except ValueError:
-                price = 0  # fallback value
+                price = 0
         else:
             price = 0
-
-        if skin_name in skin_names:
-            skin_names[skin_name].append(price)
-
-    # Clear previous dashboard data (optional: skip if you want to keep historical)
-    dashboard_sheet.resize(rows=1)  # keep headers only
+        skin_names[skin_name].append(price)
 
     for skin in SKINS:
         skin_name = skin['name']
         prices = skin_names.get(skin_name, [])
-
         if prices:
             latest_price = prices[-1]
             avg_price = sum(prices) / len(prices)
             price_change = ((latest_price - prices[0]) / prices[0]) * 100 if prices[0] else 0
-
             row_data = [
                 skin_name,
                 latest_price,
-                "",  # Placeholder for sparkline (if used)
+                f'=SPARKLINE(E{len(skin_names)}:E{len(skin_names)+len(prices)-1})',
                 len(prices),
-                round(avg_price, 2),
-                round(price_change, 2)
+                avg_price,
+                price_change
             ]
-
             dashboard_sheet.append_row(row_data)
+
 # === Update Dashboard after logging new data ===
 if log_rows:
     update_dashboard(log_rows)
     print("✅ Dashboard updated with the latest data.")
-
