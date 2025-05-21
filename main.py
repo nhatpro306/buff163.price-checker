@@ -30,7 +30,6 @@ SKINS = [
         "name": "Gloves | Nocts",
         "condition": "Field-Tested"
     },
-    
     {
         "goods_id": "42587",
         "name": "Butterfly | Tiger Tooth",
@@ -49,7 +48,6 @@ client = gspread.authorize(creds)
 try:
     log_sheet = client.open(SHEET_NAME).worksheet(LOG_SHEET_NAME)
 except:
-    # Create log sheet if not exist
     spreadsheet = client.open(SHEET_NAME)
     log_sheet = spreadsheet.add_worksheet(title=LOG_SHEET_NAME, rows="1000", cols="10")
     log_sheet.append_row(["Timestamp", "Knife Type", "Skin Name", "Condition", "Price (¥)", "Sell Listings"])
@@ -61,12 +59,17 @@ log_rows = []
 
 for skin in SKINS:
     try:
+        # Fetch lowest price
         url = f"https://buff.163.com/api/market/goods/sell_order?game=csgo&goods_id={skin['goods_id']}&page_num=1&sort_by=default"
         response = requests.get(url, headers=headers)
         data = response.json()
-
         orders = data["data"]["items"]
-        sell_count = data["data"]["total_count"]
+
+        # Fetch total sell count (correct one)
+        info_url = f"https://buff.163.com/api/market/goods/goods_info?game=csgo&goods_id={skin['goods_id']}"
+        info_response = requests.get(info_url, headers=headers)
+        info_data = info_response.json()
+        sell_count = info_data["data"]["sell_num"]
 
         if orders:
             price = float(orders[0]["price"])
@@ -83,10 +86,10 @@ if log_rows:
     print("✅ Logged data to HistoryLog sheet.")
 else:
     print("⚠️ No data to log.")
+
 # === Dashboard Setup ===
 DASHBOARD_SHEET_NAME = "Dashboard"
 
-# Check if dashboard sheet exists, create it if not
 try:
     dashboard_sheet = client.open(SHEET_NAME).worksheet(DASHBOARD_SHEET_NAME)
 except:
@@ -94,55 +97,17 @@ except:
     dashboard_sheet = spreadsheet.add_worksheet(title=DASHBOARD_SHEET_NAME, rows="1000", cols="10")
     dashboard_sheet.append_row(["Skin Name", "Latest Price (¥)", "Price Trend", "Sell Listings", "Average Price (¥)", "Price Change %"])
 
- # === Update Dashboard ===
+# === Update Dashboard ===
 def update_dashboard(log_rows):
-    # Read all log data
     all_logs = log_sheet.get_all_values()
     skin_names = {skin['name']: [] for skin in SKINS}
 
-    # Collect price data per skin
-    for row in all_logs[1:]:  # Skip header
+    for row in all_logs[1:]:
         skin_name = row[2]
         price_str = row[4]
-        
-        # Handle price format with commas
         if price_str:
-            # Replace comma with dot for conversion
             price_str = price_str.replace(',', '.')
-            
             try:
                 price = float(price_str)
             except ValueError:
-                price = 0  # If conversion fails, set price to 0
-        else:
-            price = 0
-
-        skin_names[skin_name].append(price)
-
-    # Update dashboard with latest prices and trends
-    for skin in SKINS:
-        skin_name = skin['name']
-        prices = skin_names.get(skin_name, [])
-        
-        if prices:
-            latest_price = prices[-1]  # Latest price
-            avg_price = sum(prices) / len(prices)  # Average price
-            price_change = ((latest_price - prices[0]) / prices[0]) * 100 if prices[0] else 0  # Price change %
-
-            # Insert values and formulas
-            row_data = [
-                skin_name, 
-                latest_price, 
-                f'=SPARKLINE(E{len(skin_names)}:E{len(skin_names)+len(prices)-1})',  # Sparkline chart
-                len(prices),  # Number of listings
-                avg_price, 
-                price_change
-            ]
-
-            # Update the row in the dashboard sheet
-            dashboard_sheet.append_row(row_data)
-
-# === Update Dashboard after logging new data ===
-if log_rows:
-    update_dashboard(log_rows)
-    print("✅ Dashboard updated with the latest data.")
+                price =
