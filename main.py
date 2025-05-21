@@ -88,7 +88,7 @@ else:
     print("⚠️ No data to log.")
 
 # === Dashboard Setup ===
-DASHBOARD_SHEET_NAME = "Dashboard"
+DASHBOARD_SHEET_NAME = "BuffKhttps://docs.google.com/spreadsheets/u/1/?authuser=1&usp=sheets_webnifeTracker"
 
 try:
     dashboard_sheet = client.open(SHEET_NAME).worksheet(DASHBOARD_SHEET_NAME)
