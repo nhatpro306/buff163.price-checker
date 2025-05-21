@@ -95,16 +95,20 @@ except:
     dashboard_sheet.append_row(["Skin Name", "Latest Price (¥)", "Price Trend", "Sell Listings", "Average Price (¥)", "Price Change %"])
 
  # === Update Dashboard ===
-def # Build a dictionary: {skin_name: {"prices": [...], "listings": latest_sell_count}}
-skin_data = {}
+def build_skin_data_dict(log_rows):
+    # Build a dictionary: {skin_name: {"prices": [...], "listings": latest_sell_count}}
+    skin_data = {}
 
-for row in log_rows:
-    skin_name = row[2]
-    price = row[4]
-    listings = row[5]
-    if skin_name not in skin_data:
-        skin_data[skin_name] = {"prices": [], "listings": listings}
-    skin_data[skin_name]["prices"].append(price)
+    for row in log_rows:
+        skin_name = row[2]
+        price = row[4]
+        listings = row[5]
+        if skin_name not in skin_data:
+            skin_data[skin_name] = {"prices": [], "listings": listings}
+        skin_data[skin_name]["prices"].append(price)
+
+    return skin_data
+
 
 update_dashboard(skin_data)
 
