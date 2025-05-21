@@ -57,7 +57,7 @@ except:
 # === Scrape and Append ===
 headers = {"User-Agent": "Mozilla/5.0"}
 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-log_rows = []
+log_row = [timestamp, knife_type, skin["name"], skin["condition"], price, sell_count]
 
 for skin in SKINS:
     try:
@@ -95,7 +95,19 @@ except:
     dashboard_sheet.append_row(["Skin Name", "Latest Price (¥)", "Price Trend", "Sell Listings", "Average Price (¥)", "Price Change %"])
 
  # === Update Dashboard ===
-def update_dashboard(log_rows):
+def # Build a dictionary: {skin_name: {"prices": [...], "listings": latest_sell_count}}
+skin_data = {}
+
+for row in log_rows:
+    skin_name = row[2]
+    price = row[4]
+    listings = row[5]
+    if skin_name not in skin_data:
+        skin_data[skin_name] = {"prices": [], "listings": listings}
+    skin_data[skin_name]["prices"].append(price)
+
+update_dashboard(skin_data)
+
     # Read all log data
     all_logs = log_sheet.get_all_values()
     skin_names = {skin['name']: [] for skin in SKINS}
