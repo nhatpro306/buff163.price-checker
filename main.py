@@ -98,11 +98,12 @@ except:
     dashboard_sheet.append_row(["Skin Name", "Latest Price (¥)", "Price Trend", "Sell Listings", "Average Price (¥)", "Price Change %"])
 
 # === Update Dashboard ===
+# === Update Dashboard ===
 def update_dashboard(log_rows):
     all_logs = log_sheet.get_all_values()
     skin_names = {skin['name']: [] for skin in SKINS}
 
-    for row in all_logs[1:]:
+    for row in all_logs[1:]:  # Skip header
         skin_name = row[2]
         price_str = row[4]
         if price_str:
@@ -110,4 +111,37 @@ def update_dashboard(log_rows):
             try:
                 price = float(price_str)
             except ValueError:
-                price =
+                price = 0  # fallback value
+        else:
+            price = 0
+
+        if skin_name in skin_names:
+            skin_names[skin_name].append(price)
+
+    # Clear previous dashboard data (optional: skip if you want to keep historical)
+    dashboard_sheet.resize(rows=1)  # keep headers only
+
+    for skin in SKINS:
+        skin_name = skin['name']
+        prices = skin_names.get(skin_name, [])
+
+        if prices:
+            latest_price = prices[-1]
+            avg_price = sum(prices) / len(prices)
+            price_change = ((latest_price - prices[0]) / prices[0]) * 100 if prices[0] else 0
+
+            row_data = [
+                skin_name,
+                latest_price,
+                "",  # Placeholder for sparkline (if used)
+                len(prices),
+                round(avg_price, 2),
+                round(price_change, 2)
+            ]
+
+            dashboard_sheet.append_row(row_data)
+# === Update Dashboard after logging new data ===
+if log_rows:
+    update_dashboard(log_rows)
+    print("✅ Dashboard updated with the latest data.")
+
