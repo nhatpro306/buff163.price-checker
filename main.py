@@ -40,6 +40,7 @@ except:
 headers = {"User-Agent": "Mozilla/5.0"}
 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 log_rows = []
+latest_sell_counts = {}
 
 for skin in SKINS:
     try:
@@ -49,6 +50,7 @@ for skin in SKINS:
 
         orders = data["data"]["items"]
         sell_count = data["data"]["total_count"]
+        latest_sell_counts[skin['name']] = sell_count  # 🔥 Store for Dashboard
 
         if orders:
             price = float(orders[0]["price"])
@@ -89,18 +91,18 @@ def update_dashboard():
             latest_price = prices[-1]
             avg_price = sum(prices) / len(prices)
             price_change = ((latest_price - prices[0]) / prices[0]) * 100 if prices[0] else 0
+            sell_count = latest_sell_counts.get(skin_name, "N/A")  # ✅ Use live listing count
 
             row_data = [
                 skin_name,
                 latest_price,
                 f'=SPARKLINE(E2:E{len(prices)+1})',
-                len(prices),
+                sell_count,
                 round(avg_price, 2),
                 round(price_change, 2)
             ]
 
             dashboard_sheet.append_row(row_data)
-
 
 if log_rows:
     update_dashboard()
