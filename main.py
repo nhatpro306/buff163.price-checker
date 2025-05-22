@@ -68,36 +68,39 @@ else:
 # === Dashboard Update ===
 def update_dashboard():
     all_logs = log_sheet.get_all_values()[1:]  # Skip header
-    skin_prices = {skin['name']: [] for skin in SKINS}
+    skin_prices = {skin['name'].strip(): [] for skin in SKINS}
 
     for row in all_logs:
-        skin_name = row[2]
+        skin_name = row[2].strip()
         price_str = row[4].replace(",", ".")
         try:
             price = float(price_str)
         except:
             price = 0
-        skin_prices[skin_name].append(price)
+        if skin_name in skin_prices:
+            skin_prices[skin_name].append(price)
+        else:
+            print(f"⚠️ Unknown skin found in log: {skin_name}")
 
     for skin in SKINS:
-        skin_name = skin['name']
+        skin_name = skin['name'].strip()
         prices = skin_prices.get(skin_name, [])
         if prices:
             latest_price = prices[-1]
             avg_price = sum(prices) / len(prices)
-            price_change = ((latest_price - prices[0]) / prices[0]) * 100 if prices[0] != 0 else 0
-            sparkline_formula = f'=SPARKLINE(E2:E{len(prices)+1})'
+            price_change = ((latest_price - prices[0]) / prices[0]) * 100 if prices[0] else 0
 
-            dashboard_row = [
+            row_data = [
                 skin_name,
                 latest_price,
-                sparkline_formula,
+                f'=SPARKLINE(E2:E{len(prices)+1})',
                 len(prices),
                 round(avg_price, 2),
                 round(price_change, 2)
             ]
 
-            dashboard_sheet.append_row(dashboard_row)
+            dashboard_sheet.append_row(row_data)
+
 
 if log_rows:
     update_dashboard()
