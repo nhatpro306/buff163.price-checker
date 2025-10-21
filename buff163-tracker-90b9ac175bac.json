@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "buff163-tracker",
+  "private_key_id": "90b9ac175bacafe1fc924fee7adfecd0ed69fc75",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCvpF7fK9Cv9Kf3\nKSdThrZiAc3GS3ofFmvVc9GtGbbXaSApNOPgn+Kv482MV+1Izevfd39DbT98GoS2\nQBMZ+EXJGNLZZo/XTD0Fx/W8YpNBuaawhJg2OB3Xz9BN14lD/SfRJD2psSHr2bj/\n1aGlb9Z2lky2aEwc3uBz7awASo3eAUOz4YvLxvZjoTWES5oPwdnp8fgPfNo/Qgrx\nGAmD6Q+VhK5V56/f0oVweeKUEIQmpbX7Hd24o+xZ0PUdPhOpQxf4rMKNzr+NP4Vo\n9wuxkTGS0qV9IIJwsonk9kl49aQWMPB7DeMW9dbr7Tud+QaYlgaZ/PA0WNiTP8m8\ny98WdLSRAgMBAAECggEAJVZ0G42RKKKCBVLwivtHcKixAX8giBTIWiErmNhvS7YL\nke7uJV1fv2PWGYhEhzZNNt1Mhr0l4oAxp5uR4/KpBSGbiv8YQ1yv2TeDh+dNpgpt\nArfBMr91qp/BCJcx1SvvB7DkUds3mo9XWj1kBkryxJVZW+pqibWgccx7xLkUlPWF\nQA6EBdNuhD3AUfgDUM3jOjI11rb7udEdZh29MKfFWTPx0quo+E5BoNqrP7qmMLWE\nBnTUTWkseItU4mDRVdpEqedVOtOfNEjpXe2rcvU2FkOJmb/DwzknXyi7xdKQhR0t\n6miwFAaWD0PUcRlXinKaQMSgUV+6ZBF3FKiHATz7pQKBgQD1IGiVfVz2jqjRvNt8\npiTdUAJDbGnxJ6t8mqqz1vsYCF+85KHvXnA5fRjqSihYKCtpnmOzneaze3FwlFhg\nmsiVliRkIUmcbxANFtz9PyWf/rYaoPIeqCxWQTVCNKIOTxqsIEFC6L2nICoAXobJ\nKhGlJ2vKNu2SpnbVrKzP5tzERQKBgQC3buohJ+LxnrsNSX8rEGzNMQdB6+J4QM1e\nwVBKnr/H1yLgHMmrk5p/rNSgbdnSfZgfJns+Ijo+xuJJbBOVTcePq/JXX8GtuXa2\ne5ChPq1QjIGlUeCgFQD0xHb2ot/+W33K+Z12DkxvSQr1zxSpRV9IJtcL40eCjHy/\nj/9i8d8B3QKBgGi3cJY0GOunZA09jdJBM8xrqpvdC6Ee3k570GLFezz4DtYmIdud\nT3nvrB4ikfufJXSYWmVYFj8khAChDuQuG3Rz0JYJ9mViuMuusbdqK4ufB3J2wRhB\npbcvYi4nR/eu6WkQ2nBX9vUXc3n258O2OhWAsraPIoycmnWLr8OdD0C1AoGBAJtZ\nTOH9lL7KjmHnX9LJ20s//YR/0FHFl+hq0aQQpB0L/1ZMKyOrIwqEBaNExVf10/J1\ntaReenOWHijOZhtpPtxXZCtJRo7pZjePmGJm4YM5K8cl+5W3lBK3nISuVgNl2rgf\nBJLp8yPAeY7J7RaaUOKbOj6wImzWrAPUYRab/yDlAoGBAOtRvSXob8G+VbXedD91\nAxh98oG92cELKI+AltaE950v8zuz/M4ZjJ4RmT8HGymYRBUKigxyo6lFic11ClKM\nrQM+6BYhg+1Y/w9du+zVBsC4oK9aIFqQcHvWtFxZjwPTTx/+C7b2dCOyf0PkvQzs\nis7hO/pRICXdFT8OB9GYLuvt\n-----END PRIVATE KEY-----\n",
+  "client_email": "buff-tracker-bot@buff163-tracker.iam.gserviceaccount.com",
+  "client_id": "107394039571168338421",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/buff-tracker-bot%40buff163-tracker.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}
