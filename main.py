@@ -107,3 +107,74 @@ def update_dashboard():
 if log_rows:
     update_dashboard()
     print("✅ Dashboard updated with the latest data.")
+    # === ARIMA Forecasting ===
+import pandas as pd
+from statsmodels.tsa.arima.model import ARIMA
+
+def run_forecasting():
+    print("🔮 Running ARIMA price forecasting...")
+
+    try:
+        # Load all log data from HistoryLog
+        log_data = log_sheet.get_all_records()
+        df = pd.DataFrame(log_data)
+
+        if df.empty:
+            print("⚠️ No historical data found for forecasting.")
+            return
+
+        df["Timestamp"] = pd.to_datetime(df["Timestamp"])
+        df["Price (¥)"] = pd.to_numeric(df["Price (¥)"], errors="coerce")
+        df = df.dropna(subset=["Price (¥)"])
+
+        # Create or open forecast sheet
+        try:
+            forecast_sheet = spreadsheet.worksheet("Forecast")
+        except:
+            forecast_sheet = spreadsheet.add_worksheet(title="Forecast", rows="200", cols="5")
+            forecast_sheet.append_row(["Skin Name", "Date", "Predicted Price (¥)"])
+
+        forecast_sheet.clear()
+        forecast_sheet.append_row(["Skin Name", "Date", "Predicted Price (¥)"])
+
+        # Loop through each skin
+        for skin_name in df["Skin Name"].unique():
+            skin_df = df[df["Skin Name"] == skin_name].copy()
+            skin_df = skin_df.sort_values("Timestamp")
+
+            if len(skin_df) < 5:
+                print(f"⚠️ Not enough data to forecast for {skin_name} ({len(skin_df)} points).")
+                continue
+
+            price_series = skin_df["Price (¥)"].values
+
+            try:
+                model = ARIMA(price_series, order=(1, 1, 1))
+                model_fit = model.fit()
+                forecast = model_fit.forecast(steps=7)
+
+                # Generate 7 future dates starting from last known date
+                last_date = skin_df["Timestamp"].iloc[-1]
+                forecast_dates = pd.date_range(start=last_date, periods=7, freq="D")
+
+                forecast_df = pd.DataFrame({
+                    "Skin Name": [skin_name] * 7,
+                    "Date": [d.strftime("%Y-%m-%d") for d in forecast_dates],
+                    "Predicted Price (¥)": [round(p, 2) for p in forecast]
+                })
+
+                forecast_sheet.append_rows(forecast_df.values.tolist(), value_input_option="USER_ENTERED")
+
+                print(f"✅ Forecast complete for {skin_name}")
+
+            except Exception as e:
+                print(f"❌ Forecast failed for {skin_name}: {e}")
+
+    except Exception as e:
+        print(f"❌ Forecasting error: {e}")
+
+# Run forecasting only if new data was logged
+if log_rows:
+    run_forecasting()
+    print("✅ ARIMA forecasting completed and written to 'Forecast' sheet.")
+
