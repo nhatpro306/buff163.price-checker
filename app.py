@@ -12,7 +12,7 @@ st.set_page_config(page_title="Buff163 Price Tracker", layout="wide")
 st.title("💰 Buff163 Price Tracker Dashboard")
 
 # --- Load data ---
-sheet_url = "https://docs.google.com/spreadsheets/d/1qiu_MZcv07dc-fBl0SYNvtIGFSPIJVsEmOlteQHeqhI/edit?usp=sharing"
+sheet_url = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTr7Aw-OEINPz2QrxhhHlJjv7TQufk0DPg1LnlPP_MyCzzRsdZCCd1UI4JAySPRrsIwRSVyltFd6bLM/pub?gid=1708877950&single=true&output=csv"
 df = pd.read_csv(sheet_url)
 
 # --- Data cleaning ---
