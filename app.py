@@ -3,6 +3,10 @@ import pandas as pd
 import altair as alt
 from statsmodels.tsa.arima.model import ARIMA
 
+from streamlit_autorefresh import st_autorefresh
+st_autorefresh(interval=60 * 1000, key="data_refresh")
+
+
 # --- Page setup ---
 st.set_page_config(page_title="Buff163 Price Tracker", layout="wide")
 st.title("💰 Buff163 Price Tracker Dashboard")
