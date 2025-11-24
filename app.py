@@ -1,118 +1,85 @@
 import streamlit as st
+import requests
 import pandas as pd
 import altair as alt
-from statsmodels.tsa.arima.model import ARIMA
-import requests
+from datetime import datetime
+from streamlit_autorefresh import st_autorefresh
 
 # -------------------------------
 # PAGE CONFIG
 # -------------------------------
-st.set_page_config(page_title="Buff163 Price Tracker", layout="wide")
-st.title("💰 Buff163 Price Tracker Dashboard")
+st.set_page_config(page_title="Buff.163 Live Tracker", layout="wide")
+st.title("💰 Buff.163 Live CS:GO Skin Price Tracker")
 
 # -------------------------------
-# SAFE DATA LOADER (Sheet.best JSON API)
+# AUTO REFRESH (optional, every 60s)
 # -------------------------------
-@st.cache_data(ttl=300)  # cache 5 minutes
-def load_data():
-    url = "https://sheet.best/api/sheets/YOUR_SHEET_ID"  # Replace with your Sheet.best URL
+st_autorefresh(interval=60 * 1000, key="live_refresh")
+
+# -------------------------------
+# SKINS CONFIG (replace with real Buff IDs)
+# -------------------------------
+SKINS = {
+    "Butterfly Knife | Fade": 123456,
+    "Karambit | Doppler": 234567,
+}
+
+skin_selected = st.sidebar.selectbox("Select a skin", list(SKINS.keys()))
+skin_id = SKINS[skin_selected]
+
+# Price alert threshold
+threshold = st.sidebar.number_input(
+    "Alert if price drops below:", value=150.0, step=1.0
+)
+
+# -------------------------------
+# FETCH LIVE PRICES FUNCTION
+# -------------------------------
+def fetch_live_prices(skin_id):
+    url = f"https://buff.163.com/api/market/goods/sell_order?game=csgo&goods_id={skin_id}&sort_by=default"
+    headers = {"User-Agent": "Mozilla/5.0"}
     try:
-        r = requests.get(url, timeout=10)
+        r = requests.get(url, headers=headers, timeout=5)
         r.raise_for_status()
         data = r.json()
-        df = pd.DataFrame(data)
-
-        # Clean & validate
-        if "Date" not in df.columns or "Skin Name" not in df.columns:
-            st.error("❌ Missing required columns in sheet data")
-            return pd.DataFrame()
-
-        df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-        df = df.dropna(subset=["Date"])
-        df = df.sort_values("Date")
-        return df
+        prices = [float(item["price"]) for item in data["data"]["items"]]
+        return prices
     except Exception as e:
-        st.error(f"❌ Failed to load data: {e}")
-        return pd.DataFrame()
-
-# Load data
-df = load_data()
-if df.empty:
-    st.warning("⚠ No data available")
-    st.stop()
+        st.error(f"Failed to fetch prices: {e}")
+        return []
 
 # -------------------------------
-# SIDEBAR FILTER
+# FETCH BUTTON
 # -------------------------------
-st.sidebar.header("Filters")
-skin_list = df["Skin Name"].dropna().unique()
-skin_selected = st.sidebar.selectbox("Select a skin", skin_list)
+if st.sidebar.button("Fetch Live Prices"):
+    prices = fetch_live_prices(skin_id)
+    
+    if prices:
+        df = pd.DataFrame({
+            "Date": [datetime.now()]*len(prices),
+            "Price": prices
+        })
 
-filtered = df[df["Skin Name"] == skin_selected]
-if filtered.empty:
-    st.warning("⚠ No data for this skin")
-    st.stop()
+        # Show price table
+        st.subheader(f"📋 Latest Listings for {skin_selected}")
+        st.dataframe(df)
 
-# -------------------------------
-# PRICE TREND CHART
-# -------------------------------
-st.subheader(f"📈 Price Trend: {skin_selected}")
-chart = (
-    alt.Chart(filtered)
-    .mark_line(point=True)
-    .encode(
-        x="Date:T",
-        y="Price:Q",
-        tooltip=["Date", "Price", "Listings"]
-    )
-    .properties(height=400)
-    .interactive()
-)
-st.altair_chart(chart, use_container_width=True)
+        # Show price distribution chart
+        st.subheader("📊 Price Distribution")
+        chart = alt.Chart(df).mark_bar().encode(
+            x=alt.X("Price:Q", bin=alt.Bin(maxbins=30), title="Price"),
+            y=alt.Y("count()", title="Number of Listings")
+        )
+        st.altair_chart(chart, use_container_width=True)
 
-# -------------------------------
-# STATS METRICS
-# -------------------------------
-latest = filtered.iloc[-1]
-col1, col2 = st.columns(2)
-col1.metric("Current Price", f"{latest['Price']:.2f}")
-col2.metric("Listings", int(latest["Listings"]))
+        # Show metrics
+        st.subheader("💵 Key Metrics")
+        st.metric("Lowest Price", f"{df['Price'].min():.2f}")
+        st.metric("Highest Price", f"{df['Price'].max():.2f}")
+        st.metric("Average Price", f"{df['Price'].mean():.2f}")
 
-# -------------------------------
-# FORECAST (ARIMA)
-# -------------------------------
-st.sidebar.subheader("Forecast Options")
-do_forecast = st.sidebar.checkbox("Enable Forecast (ARIMA)")
-
-if do_forecast:
-    series = filtered["Price"].dropna()
-    if len(series) < 10:
-        st.warning("⚠ Not enough data for ARIMA forecast")
+        # Price alert
+        if df['Price'].min() < threshold:
+            st.warning(f"⚠ Price dropped below {threshold}! Current lowest: {df['Price'].min():.2f}")
     else:
-        try:
-            if st.button("Run 7-Day Forecast"):
-                with st.spinner("Generating ARIMA forecast..."):
-                    model = ARIMA(series, order=(1, 1, 1))
-                    fit = model.fit()
-                    forecast = fit.forecast(steps=7)
-                    forecast_df = pd.DataFrame({
-                        "Date": pd.date_range(
-                            start=filtered["Date"].iloc[-1] + pd.Timedelta(days=1),
-                            periods=7,
-                            freq="D"
-                        ),
-                        "Forecast": forecast
-                    })
-                    st.subheader("🔮 7-Day Price Forecast")
-                    forecast_chart = (
-                        alt.Chart(forecast_df)
-                        .mark_line(color="orange")
-                        .encode(
-                            x="Date:T",
-                            y="Forecast:Q"
-                        )
-                        .properties(height=300)
-                    )
-                    st.altair_chart(forecast_chart, use_container_width=True)
-        except Exception as e:
-            st.error(f"❌ ARIMA Forecast failed: {e}")
+        st.warning("No data fetched yet.")
