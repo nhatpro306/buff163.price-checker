@@ -12,9 +12,10 @@ st.set_page_config(page_title="Buff.163 Live Tracker", layout="wide")
 st.title("💰 Buff.163 Live CS:GO Skin Price Tracker")
 
 # -------------------------------
-# AUTO REFRESH (optional, every 60s)
+# AUTO REFRESH EVERY 12 HOURS
 # -------------------------------
-st_autorefresh(interval=60 * 1000, key="live_refresh")
+# 12 hours = 12*60*60*1000 milliseconds = 43,200,000 ms
+st_autorefresh(interval=43_200_000, key="auto_refresh_12h")
 
 # -------------------------------
 # SKINS CONFIG (replace with real Buff IDs)
@@ -39,7 +40,7 @@ def fetch_live_prices(skin_id):
     url = f"https://buff.163.com/api/market/goods/sell_order?game=csgo&goods_id={skin_id}&sort_by=default"
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
-        r = requests.get(url, headers=headers, timeout=5)
+        r = requests.get(url, headers=headers, timeout=10)
         r.raise_for_status()
         data = r.json()
         prices = [float(item["price"]) for item in data["data"]["items"]]
@@ -49,37 +50,36 @@ def fetch_live_prices(skin_id):
         return []
 
 # -------------------------------
-# FETCH BUTTON
+# FETCH AND DISPLAY PRICES
 # -------------------------------
-if st.sidebar.button("Fetch Live Prices"):
-    prices = fetch_live_prices(skin_id)
-    
-    if prices:
-        df = pd.DataFrame({
-            "Date": [datetime.now()]*len(prices),
-            "Price": prices
-        })
+prices = fetch_live_prices(skin_id)
 
-        # Show price table
-        st.subheader(f"📋 Latest Listings for {skin_selected}")
-        st.dataframe(df)
+if prices:
+    df = pd.DataFrame({
+        "Date": [datetime.now()]*len(prices),
+        "Price": prices
+    })
 
-        # Show price distribution chart
-        st.subheader("📊 Price Distribution")
-        chart = alt.Chart(df).mark_bar().encode(
-            x=alt.X("Price:Q", bin=alt.Bin(maxbins=30), title="Price"),
-            y=alt.Y("count()", title="Number of Listings")
-        )
-        st.altair_chart(chart, use_container_width=True)
+    # Show price table
+    st.subheader(f"📋 Latest Listings for {skin_selected}")
+    st.dataframe(df)
 
-        # Show metrics
-        st.subheader("💵 Key Metrics")
-        st.metric("Lowest Price", f"{df['Price'].min():.2f}")
-        st.metric("Highest Price", f"{df['Price'].max():.2f}")
-        st.metric("Average Price", f"{df['Price'].mean():.2f}")
+    # Show price distribution chart
+    st.subheader("📊 Price Distribution")
+    chart = alt.Chart(df).mark_bar().encode(
+        x=alt.X("Price:Q", bin=alt.Bin(maxbins=30), title="Price"),
+        y=alt.Y("count()", title="Number of Listings")
+    )
+    st.altair_chart(chart, use_container_width=True)
 
-        # Price alert
-        if df['Price'].min() < threshold:
-            st.warning(f"⚠ Price dropped below {threshold}! Current lowest: {df['Price'].min():.2f}")
-    else:
-        st.warning("No data fetched yet.")
+    # Show metrics
+    st.subheader("💵 Key Metrics")
+    st.metric("Lowest Price", f"{df['Price'].min():.2f}")
+    st.metric("Highest Price", f"{df['Price'].max():.2f}")
+    st.metric("Average Price", f"{df['Price'].mean():.2f}")
+
+    # Price alert
+    if df['Price'].min() < threshold:
+        st.warning(f"⚠ Price dropped below {threshold}! Current lowest: {df['Price'].min():.2f}")
+else:
+    st.warning("No data fetched yet.")
