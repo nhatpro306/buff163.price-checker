@@ -1,9 +1,8 @@
 import streamlit as st
 import pandas as pd
 import altair as alt
-import requests
 from statsmodels.tsa.arima.model import ARIMA
-from io import StringIO
+import requests
 
 # -------------------------------
 # PAGE CONFIG
@@ -12,39 +11,34 @@ st.set_page_config(page_title="Buff163 Price Tracker", layout="wide")
 st.title("💰 Buff163 Price Tracker Dashboard")
 
 # -------------------------------
-# SAFE GOOGLE SHEET LOADER
+# SAFE DATA LOADER (Sheet.best JSON API)
 # -------------------------------
-@st.cache_data(ttl=120)   # cache 2 minutes
+@st.cache_data(ttl=300)  # cache 5 minutes
 def load_data():
-    url = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTr7Aw-OEINPz2QrxhhHlJjv7TQufk0DPg1LnlPP_MyCzzRsdZCCd1UI4JAySPRrsIwRSVyltFd6bLM/pub?gid=1708877950&single=true&output=csv"
-
+    url = "https://sheet.best/api/sheets/YOUR_SHEET_ID"  # Replace with your Sheet.best URL
     try:
-        resp = requests.get(url, timeout=10)
-        resp.raise_for_status()
+        r = requests.get(url, timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        df = pd.DataFrame(data)
 
-        # Use StringIO instead of deprecated pd.compat
-        df = pd.read_csv(StringIO(resp.text))
-
-        # Clean + sort
+        # Clean & validate
         if "Date" not in df.columns or "Skin Name" not in df.columns:
-            st.error("❌ Missing required columns in Google Sheet.")
+            st.error("❌ Missing required columns in sheet data")
             return pd.DataFrame()
+
         df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
         df = df.dropna(subset=["Date"])
         df = df.sort_values("Date")
         return df
-
     except Exception as e:
-        st.error(f"❌ Failed to load Google Sheet: {e}")
-        return pd.DataFrame()  # return empty so app still runs
+        st.error(f"❌ Failed to load data: {e}")
+        return pd.DataFrame()
 
-# -------------------------------
-# LOAD DATA
-# -------------------------------
+# Load data
 df = load_data()
-
 if df.empty:
-    st.warning("⚠ No data available. Check your Google Sheet.")
+    st.warning("⚠ No data available")
     st.stop()
 
 # -------------------------------
@@ -54,17 +48,15 @@ st.sidebar.header("Filters")
 skin_list = df["Skin Name"].dropna().unique()
 skin_selected = st.sidebar.selectbox("Select a skin", skin_list)
 
-# Filtered data
 filtered = df[df["Skin Name"] == skin_selected]
 if filtered.empty:
-    st.warning("⚠ No data found for this skin.")
+    st.warning("⚠ No data for this skin")
     st.stop()
 
 # -------------------------------
 # PRICE TREND CHART
 # -------------------------------
 st.subheader(f"📈 Price Trend: {skin_selected}")
-
 chart = (
     alt.Chart(filtered)
     .mark_line(point=True)
@@ -95,10 +87,9 @@ do_forecast = st.sidebar.checkbox("Enable Forecast (ARIMA)")
 if do_forecast:
     series = filtered["Price"].dropna()
     if len(series) < 10:
-        st.warning("⚠ Not enough data for ARIMA forecast (need 10+ points).")
+        st.warning("⚠ Not enough data for ARIMA forecast")
     else:
         try:
-            # ARIMA fit may take time, run inside button to prevent hang
             if st.button("Run 7-Day Forecast"):
                 with st.spinner("Generating ARIMA forecast..."):
                     model = ARIMA(series, order=(1, 1, 1))
