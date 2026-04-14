@@ -6,3 +6,4 @@ oauth2client==4.1.3
 statsmodels
 streamlit
 altair
+streamlit-autorefresh

@@ -9,6 +9,10 @@ on:
 jobs:
   run-tracker:
     runs-on: ubuntu-latest
+    env:
+      GSHEET_CREDS_JSON: ${{ secrets.GSHEET_CREDS }}
+      BUFF_COOKIE: ${{ secrets.BUFF_COOKIE }}
+      BUFF_SHEET_NAME: BuffKnifeTracker
 
     steps:
       - name: Checkout code
@@ -21,17 +25,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
-          pip install statsmodels
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          else
-            echo "No requirements.txt found, skipping install."
-          fi
-
-      - name: Write credentials to file
-        run: echo '${{ secrets.GSHEET_CREDS }}' > credentials.json
+          pip install -r requirements.txt
 
       - name: Run the Buff tracker
         run: python main.py

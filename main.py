@@ -1,180 +1,528 @@
-import requests
+from __future__ import annotations
+
+import math
+import os
+import json
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from statistics import mean, pstdev
+from typing import Any
+
 import gspread
+import pandas as pd
+import requests
 from oauth2client.service_account import ServiceAccountCredentials
-from datetime import datetime
+from requests.adapters import HTTPAdapter
+from statsmodels.tsa.arima.model import ARIMA
+from urllib3.util.retry import Retry
 
-# === Config ===
-SKINS = [
-    {"goods_id": "42552", "name": "Butterfly | Damascus Steel", "condition": "Field-Tested"},
-    {"goods_id": "42555", "name": "Butterfly | Doppler", "condition": "Factory New"},
-    {"goods_id": "42998", "name": "Karambit | Doppler", "condition": "Factory New"},
-    {"goods_id": "42533", "name": "Butterfly | Blue Steel", "condition": "Field-Tested"},
-    {"goods_id": "83578", "name": "Gloves | Nocts", "condition": "Field-Tested"},
-    {"goods_id": "42587", "name": "Butterfly | Tiger Tooth", "condition": "Factory New"},
-]
 
-SHEET_NAME = "BuffKnifeTracker"
+SHEET_NAME = os.getenv("BUFF_SHEET_NAME", "BuffKnifeTracker")
 LOG_SHEET_NAME = "HistoryLog"
 DASHBOARD_SHEET_NAME = "Dashboard"
+FORECAST_SHEET_NAME = "Forecast"
+SIGNALS_SHEET_NAME = "Signals"
 
-# === Google Sheets Setup ===
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
-client = gspread.authorize(creds)
 
-# Open or create sheets
-spreadsheet = client.open(SHEET_NAME)
-try:
-    log_sheet = spreadsheet.worksheet(LOG_SHEET_NAME)
-except:
-    log_sheet = spreadsheet.add_worksheet(title=LOG_SHEET_NAME, rows="1000", cols="10")
-    log_sheet.append_row(["Timestamp", "Knife Type", "Skin Name", "Condition", "Price (¥)", "Sell Listings"])
+@dataclass(frozen=True)
+class SkinConfig:
+    goods_id: str
+    name: str
+    condition: str
 
-try:
-    dashboard_sheet = spreadsheet.worksheet(DASHBOARD_SHEET_NAME)
-except:
-    dashboard_sheet = spreadsheet.add_worksheet(title=DASHBOARD_SHEET_NAME, rows="1000", cols="10")
-    dashboard_sheet.append_row(["Skin Name", "Latest Price (¥)", "Price Trend", "Sell Listings", "Average Price (¥)", "Price Change %"])
+    @property
+    def knife_type(self) -> str:
+        return self.name.split(" | ")[0].strip()
 
-# === Scrape and Log Data ===
-headers = {"User-Agent": "Mozilla/5.0"}
-timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-log_rows = []
-latest_sell_counts = {}
 
-for skin in SKINS:
-    try:
-        url = f"https://buff.163.com/api/market/goods/sell_order?game=csgo&goods_id={skin['goods_id']}&page_num=1&sort_by=default"
-        response = requests.get(url, headers=headers)
-        data = response.json()
+SKINS: list[SkinConfig] = [
+    SkinConfig(goods_id="42552", name="Butterfly | Damascus Steel", condition="Field-Tested"),
+    SkinConfig(goods_id="42555", name="Butterfly | Doppler", condition="Factory New"),
+    SkinConfig(goods_id="42998", name="Karambit | Doppler", condition="Factory New"),
+    SkinConfig(goods_id="42533", name="Butterfly | Blue Steel", condition="Field-Tested"),
+    SkinConfig(goods_id="83578", name="Gloves | Nocts", condition="Field-Tested"),
+    SkinConfig(goods_id="42587", name="Butterfly | Tiger Tooth", condition="Factory New"),
+]
 
-        orders = data["data"]["items"]
-        sell_count = data["data"]["total_count"]
-        latest_sell_counts[skin['name']] = sell_count  # 🔥 Store for Dashboard
 
-        if orders:
-            price = float(orders[0]["price"])
-            knife_type = skin["name"].split(" | ")[0].strip()
-            log_row = [timestamp, knife_type, skin["name"], skin["condition"], price, sell_count]
-            log_rows.append(log_row)
+class BuffPriceClient:
+    BASE_URL = "https://buff.163.com/api/market/goods/sell_order"
 
-    except Exception as e:
-        print(f"❌ Error fetching {skin['name']}: {e}")
+    def __init__(self, timeout: int = 20) -> None:
+        self.timeout = timeout
+        self.session = requests.Session()
+        retry = Retry(
+            total=4,
+            backoff_factor=1.2,
+            status_forcelist=(429, 500, 502, 503, 504),
+            allowed_methods=("GET",),
+        )
+        self.session.mount("https://", HTTPAdapter(max_retries=retry))
+        self.session.headers.update(
+            {
+                "Accept": "application/json, text/plain, */*",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Referer": "https://buff.163.com/market/csgo",
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0.0.0 Safari/537.36"
+                ),
+            }
+        )
+        cookie = os.getenv("BUFF_COOKIE")
+        if cookie:
+            self.session.headers["Cookie"] = cookie
 
-if log_rows:
-    log_sheet.append_rows(log_rows, value_input_option="USER_ENTERED")
-    print("✅ Logged data to HistoryLog sheet.")
-else:
-    print("⚠️ No data to log.")
+    def fetch_sell_snapshot(self, skin: SkinConfig) -> dict[str, Any]:
+        params = {
+            "game": "csgo",
+            "goods_id": skin.goods_id,
+            "page_num": 1,
+            "sort_by": "default",
+        }
+        response = self.session.get(self.BASE_URL, params=params, timeout=self.timeout)
+        response.raise_for_status()
 
-# === Dashboard Update ===
-def update_dashboard():
-    all_logs = log_sheet.get_all_values()[1:]  # Skip header
-    skin_prices = {skin['name'].strip(): [] for skin in SKINS}
+        payload = response.json()
+        if payload.get("code") not in (None, "OK") and payload.get("code") != "OK":
+            raise ValueError(f"BUFF API returned error code: {payload.get('code')}")
 
-    for row in all_logs:
-        skin_name = row[2].strip()
-        price_str = row[4].replace(",", ".")
+        data = payload.get("data") or {}
+        items = data.get("items") or []
+        if not items:
+            raise ValueError("BUFF API returned no sell orders.")
+
+        best_order = items[0]
+        price = float(best_order["price"])
+        sell_count = int(data.get("total_count") or len(items))
+
+        return {
+            "goods_id": skin.goods_id,
+            "knife_type": skin.knife_type,
+            "skin_name": skin.name,
+            "condition": skin.condition,
+            "price": round(price, 2),
+            "sell_count": sell_count,
+            "sample_size": len(items),
+        }
+
+
+class SheetStore:
+    def __init__(self, sheet_name: str) -> None:
+        scope = [
+            "https://spreadsheets.google.com/feeds",
+            "https://www.googleapis.com/auth/drive",
+        ]
+        creds = load_google_credentials(scope)
+        self.client = gspread.authorize(creds)
+        self.spreadsheet = self.client.open(sheet_name)
+
+    def worksheet(self, title: str, headers: list[str], rows: int = 1000, cols: int = 20):
         try:
-            price = float(price_str)
-        except:
-            price = 0
-        if skin_name in skin_prices:
-            skin_prices[skin_name].append(price)
-        else:
-            print(f"⚠️ Unknown skin found in log: {skin_name}")
+            sheet = self.spreadsheet.worksheet(title)
+        except gspread.WorksheetNotFound:
+            sheet = self.spreadsheet.add_worksheet(title=title, rows=str(rows), cols=str(cols))
+            sheet.append_row(headers)
+        return sheet
 
-    for skin in SKINS:
-        skin_name = skin['name'].strip()
-        prices = skin_prices.get(skin_name, [])
-        if prices:
-            latest_price = prices[-1]
-            avg_price = sum(prices) / len(prices)
-            price_change = ((latest_price - prices[0]) / prices[0]) * 100 if prices[0] else 0
-            sell_count = latest_sell_counts.get(skin_name, "N/A")  # ✅ Use live listing count
+    def history_rows(self) -> list[dict[str, Any]]:
+        sheet = self.worksheet(
+            LOG_SHEET_NAME,
+            [
+                "Timestamp",
+                "Goods ID",
+                "Knife Type",
+                "Skin Name",
+                "Condition",
+                "Price",
+                "Listings",
+                "Observed Orders",
+            ],
+        )
+        return sheet.get_all_records()
 
-            row_data = [
-                skin_name,
-                latest_price,
-                f'=SPARKLINE(E2:E{len(prices)+1})',
-                sell_count,
-                round(avg_price, 2),
-                round(price_change, 2)
+
+def resolve_credentials_path() -> Path:
+    env_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    if env_path and Path(env_path).exists():
+        return Path(env_path)
+
+    candidates = [
+        Path("credentials.json"),
+        Path(__file__).resolve().parent / "credentials.json",
+        Path(__file__).resolve().parent.parent / "credentials.json",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+
+    raise FileNotFoundError(
+        "credentials.json was not found. Put it next to main.py, one folder above it, or set GOOGLE_APPLICATION_CREDENTIALS."
+    )
+
+
+def load_google_credentials(scope: list[str]) -> ServiceAccountCredentials:
+    raw_json = os.getenv("GSHEET_CREDS_JSON")
+    if raw_json:
+        return ServiceAccountCredentials.from_json_keyfile_dict(json.loads(raw_json), scope)
+
+    raw_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+    if raw_path:
+        return ServiceAccountCredentials.from_json_keyfile_dict(json.loads(raw_path), scope)
+
+    try:
+        import streamlit as st
+
+        if "GSHEET_CREDS_JSON" in st.secrets:
+            return ServiceAccountCredentials.from_json_keyfile_dict(
+                json.loads(st.secrets["GSHEET_CREDS_JSON"]),
+                scope,
+            )
+
+        if "gcp_service_account" in st.secrets:
+            return ServiceAccountCredentials.from_json_keyfile_dict(
+                dict(st.secrets["gcp_service_account"]),
+                scope,
+            )
+    except Exception:
+        pass
+
+    return ServiceAccountCredentials.from_json_keyfile_name(str(resolve_credentials_path()), scope)
+
+
+class PriceAnalysisAgent:
+    def __init__(self, history: pd.DataFrame) -> None:
+        self.history = history.copy()
+        if not self.history.empty:
+            self.history["Timestamp"] = pd.to_datetime(self.history["Timestamp"], errors="coerce", utc=True)
+            self.history["Price"] = pd.to_numeric(self.history["Price"], errors="coerce")
+            self.history["Listings"] = pd.to_numeric(self.history["Listings"], errors="coerce")
+            self.history = self.history.dropna(subset=["Timestamp", "Skin Name", "Price", "Listings"])
+
+    def summarize_skin(self, skin_name: str) -> dict[str, Any] | None:
+        skin_history = self.history[self.history["Skin Name"] == skin_name].sort_values("Timestamp")
+        if skin_history.empty:
+            return None
+
+        prices = skin_history["Price"].tolist()
+        listings = skin_history["Listings"].tolist()
+        latest_price = prices[-1]
+        baseline_price = mean(prices[:-1]) if len(prices) > 1 else latest_price
+        min_price = min(prices)
+        max_price = max(prices)
+        avg_price = mean(prices)
+        price_stddev = pstdev(prices) if len(prices) > 1 else 0.0
+        volatility_pct = (price_stddev / avg_price * 100) if avg_price else 0.0
+        price_change_pct = ((latest_price - baseline_price) / baseline_price * 100) if baseline_price else 0.0
+
+        recent_window = prices[-3:] if len(prices) >= 3 else prices
+        short_term_avg = mean(recent_window)
+        listing_avg = mean(listings)
+        latest_listings = listings[-1]
+        listing_pressure_pct = ((latest_listings - listing_avg) / listing_avg * 100) if listing_avg else 0.0
+
+        signal, confidence, rationale = self._classify(
+            latest_price=latest_price,
+            avg_price=avg_price,
+            short_term_avg=short_term_avg,
+            min_price=min_price,
+            max_price=max_price,
+            latest_listings=latest_listings,
+            listing_avg=listing_avg,
+            volatility_pct=volatility_pct,
+        )
+
+        return {
+            "skin_name": skin_name,
+            "latest_price": round(latest_price, 2),
+            "average_price": round(avg_price, 2),
+            "min_price": round(min_price, 2),
+            "max_price": round(max_price, 2),
+            "price_change_pct": round(price_change_pct, 2),
+            "volatility_pct": round(volatility_pct, 2),
+            "latest_listings": int(latest_listings),
+            "listing_pressure_pct": round(listing_pressure_pct, 2),
+            "signal": signal,
+            "confidence": round(confidence, 2),
+            "rationale": rationale,
+            "data_points": len(prices),
+        }
+
+    def _classify(
+        self,
+        *,
+        latest_price: float,
+        avg_price: float,
+        short_term_avg: float,
+        min_price: float,
+        max_price: float,
+        latest_listings: float,
+        listing_avg: float,
+        volatility_pct: float,
+    ) -> tuple[str, float, str]:
+        undervalued = latest_price < avg_price * 0.97
+        overvalued = latest_price > avg_price * 1.03
+        listing_spike = latest_listings > listing_avg * 1.1 if listing_avg else False
+        listing_drop = latest_listings < listing_avg * 0.9 if listing_avg else False
+        near_floor = math.isclose(latest_price, min_price, rel_tol=0.01) or latest_price <= min_price * 1.03
+        near_ceiling = math.isclose(latest_price, max_price, rel_tol=0.01) or latest_price >= max_price * 0.97
+
+        confidence = 0.45
+        if undervalued and listing_spike:
+            confidence = 0.79
+            return (
+                "BUY_WATCH",
+                confidence,
+                "Price is below its historical average while listings are elevated, which can signal short-term oversupply.",
+            )
+        if overvalued and listing_drop:
+            confidence = 0.76
+            return (
+                "SELL_WATCH",
+                confidence,
+                "Price is above its historical average and listings are tightening, which can indicate a stretched market.",
+            )
+        if near_floor and latest_price <= short_term_avg:
+            confidence = 0.67
+            return (
+                "ACCUMULATE",
+                confidence,
+                "Price is trading near the lower end of its observed range without overheating above the recent average.",
+            )
+        if near_ceiling and latest_price >= short_term_avg:
+            confidence = 0.66
+            return (
+                "TAKE_PROFIT",
+                confidence,
+                "Price is near the top of the observed range and already above the recent average.",
+            )
+        if volatility_pct >= 8:
+            confidence = 0.58
+            return (
+                "HIGH_VOLATILITY",
+                confidence,
+                "Price swings are elevated, so waiting for a cleaner setup is safer than reacting to one snapshot.",
+            )
+        return (
+            "HOLD",
+            confidence,
+            "Current price and listing depth are close to their recent baseline, so there is no strong edge yet.",
+        )
+
+
+def load_history_frame(store: SheetStore) -> pd.DataFrame:
+    rows = store.history_rows()
+    if not rows:
+        return pd.DataFrame(
+            columns=[
+                "Timestamp",
+                "Goods ID",
+                "Knife Type",
+                "Skin Name",
+                "Condition",
+                "Price",
+                "Listings",
+                "Observed Orders",
             ]
+        )
+    return pd.DataFrame(rows)
 
-            dashboard_sheet.append_row(row_data)
 
-if log_rows:
-    update_dashboard()
-    print("✅ Dashboard updated with the latest data.")
-    # === ARIMA Forecasting ===
-import pandas as pd
-from statsmodels.tsa.arima.model import ARIMA
+def append_history(store: SheetStore, snapshots: list[dict[str, Any]], timestamp: str) -> None:
+    if not snapshots:
+        return
 
-def run_forecasting():
-    print("🔮 Running ARIMA price forecasting...")
+    sheet = store.worksheet(
+        LOG_SHEET_NAME,
+        [
+            "Timestamp",
+            "Goods ID",
+            "Knife Type",
+            "Skin Name",
+            "Condition",
+            "Price",
+            "Listings",
+            "Observed Orders",
+        ],
+    )
+    rows = [
+        [
+            timestamp,
+            snapshot["goods_id"],
+            snapshot["knife_type"],
+            snapshot["skin_name"],
+            snapshot["condition"],
+            snapshot["price"],
+            snapshot["sell_count"],
+            snapshot["sample_size"],
+        ]
+        for snapshot in snapshots
+    ]
+    sheet.append_rows(rows, value_input_option="USER_ENTERED")
 
-    try:
-        # Load all log data from HistoryLog
-        log_data = log_sheet.get_all_records()
-        df = pd.DataFrame(log_data)
 
-        if df.empty:
-            print("⚠️ No historical data found for forecasting.")
-            return
+def rebuild_dashboard(store: SheetStore, analysis_rows: list[dict[str, Any]]) -> None:
+    dashboard = store.worksheet(
+        DASHBOARD_SHEET_NAME,
+        [
+            "Skin Name",
+            "Latest Price",
+            "Average Price",
+            "Min Price",
+            "Max Price",
+            "Price Change %",
+            "Volatility %",
+            "Latest Listings",
+            "Listing Pressure %",
+            "Signal",
+            "Confidence",
+        ],
+    )
+    dashboard.clear()
+    dashboard.append_row(
+        [
+            "Skin Name",
+            "Latest Price",
+            "Average Price",
+            "Min Price",
+            "Max Price",
+            "Price Change %",
+            "Volatility %",
+            "Latest Listings",
+            "Listing Pressure %",
+            "Signal",
+            "Confidence",
+        ]
+    )
+    if analysis_rows:
+        dashboard.append_rows(
+            [
+                [
+                    row["skin_name"],
+                    row["latest_price"],
+                    row["average_price"],
+                    row["min_price"],
+                    row["max_price"],
+                    row["price_change_pct"],
+                    row["volatility_pct"],
+                    row["latest_listings"],
+                    row["listing_pressure_pct"],
+                    row["signal"],
+                    row["confidence"],
+                ]
+                for row in analysis_rows
+            ],
+            value_input_option="USER_ENTERED",
+        )
 
-        df["Timestamp"] = pd.to_datetime(df["Timestamp"])
-        df["Price (¥)"] = pd.to_numeric(df["Price (¥)"], errors="coerce")
-        df = df.dropna(subset=["Price (¥)"])
 
-        # Create or open forecast sheet
+def rebuild_signals(store: SheetStore, analysis_rows: list[dict[str, Any]], timestamp: str) -> None:
+    signals = store.worksheet(
+        SIGNALS_SHEET_NAME,
+        [
+            "Timestamp",
+            "Skin Name",
+            "Signal",
+            "Confidence",
+            "Rationale",
+            "Data Points",
+        ],
+    )
+    signals.clear()
+    signals.append_row(
+        ["Timestamp", "Skin Name", "Signal", "Confidence", "Rationale", "Data Points"]
+    )
+    if analysis_rows:
+        signals.append_rows(
+            [
+                [
+                    timestamp,
+                    row["skin_name"],
+                    row["signal"],
+                    row["confidence"],
+                    row["rationale"],
+                    row["data_points"],
+                ]
+                for row in analysis_rows
+            ],
+            value_input_option="USER_ENTERED",
+        )
+
+
+def rebuild_forecast(store: SheetStore, history: pd.DataFrame) -> None:
+    forecast_sheet = store.worksheet(
+        FORECAST_SHEET_NAME,
+        ["Skin Name", "Forecast Date", "Predicted Price"],
+        rows=500,
+        cols=10,
+    )
+    forecast_sheet.clear()
+    forecast_sheet.append_row(["Skin Name", "Forecast Date", "Predicted Price"])
+
+    if history.empty:
+        return
+
+    prepared = history.copy()
+    prepared["Timestamp"] = pd.to_datetime(prepared["Timestamp"], errors="coerce", utc=True)
+    prepared["Price"] = pd.to_numeric(prepared["Price"], errors="coerce")
+    prepared = prepared.dropna(subset=["Timestamp", "Skin Name", "Price"])
+
+    forecast_rows: list[list[Any]] = []
+    for skin_name, skin_df in prepared.groupby("Skin Name"):
+        skin_df = skin_df.sort_values("Timestamp")
+        if len(skin_df) < 6:
+            continue
+
         try:
-            forecast_sheet = spreadsheet.worksheet("Forecast")
-        except:
-            forecast_sheet = spreadsheet.add_worksheet(title="Forecast", rows="200", cols="5")
-            forecast_sheet.append_row(["Skin Name", "Date", "Predicted Price (¥)"])
+            model = ARIMA(skin_df["Price"].values, order=(1, 1, 1))
+            fitted = model.fit()
+            forecast = fitted.forecast(steps=7)
+            future_dates = pd.date_range(
+                start=skin_df["Timestamp"].iloc[-1] + pd.Timedelta(days=1),
+                periods=7,
+                freq="D",
+            )
+            for forecast_date, predicted_price in zip(future_dates, forecast):
+                forecast_rows.append(
+                    [skin_name, forecast_date.strftime("%Y-%m-%d"), round(float(predicted_price), 2)]
+                )
+        except Exception as exc:
+            print(f"Forecast skipped for {skin_name}: {exc}")
 
-        forecast_sheet.clear()
-        forecast_sheet.append_row(["Skin Name", "Date", "Predicted Price (¥)"])
+    if forecast_rows:
+        forecast_sheet.append_rows(forecast_rows, value_input_option="USER_ENTERED")
 
-        # Loop through each skin
-        for skin_name in df["Skin Name"].unique():
-            skin_df = df[df["Skin Name"] == skin_name].copy()
-            skin_df = skin_df.sort_values("Timestamp")
 
-            if len(skin_df) < 5:
-                print(f"⚠️ Not enough data to forecast for {skin_name} ({len(skin_df)} points).")
-                continue
+def run() -> None:
+    store = SheetStore(SHEET_NAME)
+    client = BuffPriceClient()
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
-            price_series = skin_df["Price (¥)"].values
+    snapshots: list[dict[str, Any]] = []
+    for skin in SKINS:
+        try:
+            snapshot = client.fetch_sell_snapshot(skin)
+            snapshots.append(snapshot)
+            print(
+                f"Fetched {skin.name}: {snapshot['price']} CNY with {snapshot['sell_count']} listings."
+            )
+        except Exception as exc:
+            print(f"Failed to fetch {skin.name}: {exc}")
 
-            try:
-                model = ARIMA(price_series, order=(1, 1, 1))
-                model_fit = model.fit()
-                forecast = model_fit.forecast(steps=7)
+    append_history(store, snapshots, timestamp)
 
-                # Generate 7 future dates starting from last known date
-                last_date = skin_df["Timestamp"].iloc[-1]
-                forecast_dates = pd.date_range(start=last_date, periods=7, freq="D")
+    history = load_history_frame(store)
+    agent = PriceAnalysisAgent(history)
+    analysis_rows = [summary for skin in SKINS if (summary := agent.summarize_skin(skin.name))]
 
-                forecast_df = pd.DataFrame({
-                    "Skin Name": [skin_name] * 7,
-                    "Date": [d.strftime("%Y-%m-%d") for d in forecast_dates],
-                    "Predicted Price (¥)": [round(p, 2) for p in forecast]
-                })
+    rebuild_dashboard(store, analysis_rows)
+    rebuild_signals(store, analysis_rows, timestamp)
+    rebuild_forecast(store, history)
 
-                forecast_sheet.append_rows(forecast_df.values.tolist(), value_input_option="USER_ENTERED")
+    print(f"Updated {len(snapshots)} skins, {len(analysis_rows)} analysis rows, and forecast output.")
 
-                print(f"✅ Forecast complete for {skin_name}")
 
-            except Exception as e:
-                print(f"❌ Forecast failed for {skin_name}: {e}")
-
-    except Exception as e:
-        print(f"❌ Forecasting error: {e}")
-
-# Run forecasting only if new data was logged
-if log_rows:
-    run_forecasting()
-    print("✅ ARIMA forecasting completed and written to 'Forecast' sheet.")
-
+if __name__ == "__main__":
+    run()
