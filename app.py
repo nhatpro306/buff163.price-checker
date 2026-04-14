@@ -11,10 +11,10 @@ from streamlit_autorefresh import st_autorefresh
 from main import (
     DASHBOARD_SHEET_NAME,
     FORECAST_SHEET_NAME,
-    LOG_SHEET_NAME,
     SHEET_NAME,
     SIGNALS_SHEET_NAME,
     SheetStore,
+    load_history_frame,
 )
 
 
@@ -40,7 +40,7 @@ def load_sheet_records(sheet_name: str) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-history_df = load_sheet_records(LOG_SHEET_NAME)
+history_df = load_history_frame(get_store())
 dashboard_df = load_sheet_records(DASHBOARD_SHEET_NAME)
 signals_df = load_sheet_records(SIGNALS_SHEET_NAME)
 forecast_df = load_sheet_records(FORECAST_SHEET_NAME)

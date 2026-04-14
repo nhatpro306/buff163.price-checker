@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import math
 import os
 import json
@@ -23,6 +24,16 @@ LOG_SHEET_NAME = "HistoryLog"
 DASHBOARD_SHEET_NAME = "Dashboard"
 FORECAST_SHEET_NAME = "Forecast"
 SIGNALS_SHEET_NAME = "Signals"
+HISTORY_HEADERS = [
+    "Timestamp",
+    "Goods ID",
+    "Knife Type",
+    "Skin Name",
+    "Condition",
+    "Price",
+    "Listings",
+    "Observed Orders",
+]
 
 
 @dataclass(frozen=True)
@@ -44,6 +55,7 @@ SKINS: list[SkinConfig] = [
     SkinConfig(goods_id="83578", name="Gloves | Nocts", condition="Field-Tested"),
     SkinConfig(goods_id="42587", name="Butterfly | Tiger Tooth", condition="Factory New"),
 ]
+SKIN_BY_NAME = {skin.name: skin for skin in SKINS}
 
 
 class BuffPriceClient:
@@ -128,20 +140,8 @@ class SheetStore:
         return sheet
 
     def history_rows(self) -> list[dict[str, Any]]:
-        sheet = self.worksheet(
-            LOG_SHEET_NAME,
-            [
-                "Timestamp",
-                "Goods ID",
-                "Knife Type",
-                "Skin Name",
-                "Condition",
-                "Price",
-                "Listings",
-                "Observed Orders",
-            ],
-        )
-        return sheet.get_all_records()
+        sheet = self.worksheet(LOG_SHEET_NAME, HISTORY_HEADERS)
+        return normalize_history_values(sheet.get_all_values()).to_dict("records")
 
 
 def resolve_credentials_path() -> Path:
@@ -190,6 +190,87 @@ def load_google_credentials(scope: list[str]) -> ServiceAccountCredentials:
         pass
 
     return ServiceAccountCredentials.from_json_keyfile_name(str(resolve_credentials_path()), scope)
+
+
+def normalize_history_values(raw_values: list[list[Any]]) -> pd.DataFrame:
+    if not raw_values:
+        return pd.DataFrame(columns=HISTORY_HEADERS)
+
+    headers = [str(cell).strip() for cell in raw_values[0]]
+    rows = raw_values[1:]
+    if not headers:
+        return pd.DataFrame(columns=HISTORY_HEADERS)
+
+    def find_index(*candidates: str) -> int | None:
+        lowered = [header.lower() for header in headers]
+        for candidate in candidates:
+            candidate_lower = candidate.lower()
+            for idx, header in enumerate(lowered):
+                if header == candidate_lower:
+                    return idx
+            for idx, header in enumerate(lowered):
+                if candidate_lower in header:
+                    return idx
+        return None
+
+    timestamp_idx = find_index("Timestamp")
+    goods_id_idx = find_index("Goods ID", "GoodsId")
+    knife_type_idx = find_index("Knife Type", "Knife")
+    skin_name_idx = find_index("Skin Name", "Skin")
+    condition_idx = find_index("Condition")
+    price_idx = find_index("Price")
+    listings_idx = find_index("Listings", "Sell Listings")
+    observed_orders_idx = find_index("Observed Orders", "Sample Size", "Observed")
+
+    normalized_rows: list[dict[str, Any]] = []
+    for row in rows:
+        if not any(str(cell).strip() for cell in row):
+            continue
+
+        def cell(idx: int | None) -> str:
+            if idx is None or idx >= len(row):
+                return ""
+            return str(row[idx]).strip()
+
+        skin_name = cell(skin_name_idx)
+        skin_config = SKIN_BY_NAME.get(skin_name)
+        knife_type = cell(knife_type_idx) or (skin_config.knife_type if skin_config else skin_name.split(" | ")[0].strip())
+        normalized_rows.append(
+            {
+                "Timestamp": cell(timestamp_idx),
+                "Goods ID": cell(goods_id_idx) or (skin_config.goods_id if skin_config else ""),
+                "Knife Type": knife_type,
+                "Skin Name": skin_name,
+                "Condition": cell(condition_idx) or (skin_config.condition if skin_config else ""),
+                "Price": cell(price_idx).replace(",", "."),
+                "Listings": cell(listings_idx),
+                "Observed Orders": cell(observed_orders_idx),
+            }
+        )
+
+    return pd.DataFrame(normalized_rows, columns=HISTORY_HEADERS)
+
+
+def migrate_history_sheet(store: SheetStore) -> int:
+    history_sheet = store.worksheet(LOG_SHEET_NAME, HISTORY_HEADERS)
+    raw_values = history_sheet.get_all_values()
+
+    if not raw_values:
+        history_sheet.clear()
+        history_sheet.append_row(HISTORY_HEADERS)
+        return 0
+
+    current_headers = [str(cell).strip() for cell in raw_values[0]]
+    normalized = normalize_history_values(raw_values)
+
+    if current_headers == HISTORY_HEADERS and len(normalized) == max(len(raw_values) - 1, 0):
+        return 0
+
+    history_sheet.clear()
+    history_sheet.append_row(HISTORY_HEADERS)
+    if not normalized.empty:
+        history_sheet.append_rows(normalized.values.tolist(), value_input_option="USER_ENTERED")
+    return len(normalized)
 
 
 class PriceAnalysisAgent:
@@ -315,19 +396,8 @@ class PriceAnalysisAgent:
 def load_history_frame(store: SheetStore) -> pd.DataFrame:
     rows = store.history_rows()
     if not rows:
-        return pd.DataFrame(
-            columns=[
-                "Timestamp",
-                "Goods ID",
-                "Knife Type",
-                "Skin Name",
-                "Condition",
-                "Price",
-                "Listings",
-                "Observed Orders",
-            ]
-        )
-    return pd.DataFrame(rows)
+        return pd.DataFrame(columns=HISTORY_HEADERS)
+    return pd.DataFrame(rows, columns=HISTORY_HEADERS)
 
 
 def append_history(store: SheetStore, snapshots: list[dict[str, Any]], timestamp: str) -> None:
@@ -336,16 +406,7 @@ def append_history(store: SheetStore, snapshots: list[dict[str, Any]], timestamp
 
     sheet = store.worksheet(
         LOG_SHEET_NAME,
-        [
-            "Timestamp",
-            "Goods ID",
-            "Knife Type",
-            "Skin Name",
-            "Condition",
-            "Price",
-            "Listings",
-            "Observed Orders",
-        ],
+        HISTORY_HEADERS,
     )
     rows = [
         [
@@ -495,8 +556,22 @@ def rebuild_forecast(store: SheetStore, history: pd.DataFrame) -> None:
         forecast_sheet.append_rows(forecast_rows, value_input_option="USER_ENTERED")
 
 
-def run() -> None:
+def run(migrate_only: bool = False) -> None:
     store = SheetStore(SHEET_NAME)
+    migrated_rows = migrate_history_sheet(store)
+    if migrated_rows:
+        print(f"Migrated {migrated_rows} existing history rows to the new schema.")
+
+    if migrate_only:
+        history = load_history_frame(store)
+        agent = PriceAnalysisAgent(history)
+        analysis_rows = [summary for skin in SKINS if (summary := agent.summarize_skin(skin.name))]
+        rebuild_dashboard(store, analysis_rows)
+        rebuild_signals(store, analysis_rows, datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"))
+        rebuild_forecast(store, history)
+        print("Migration-only run completed.")
+        return
+
     client = BuffPriceClient()
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
@@ -525,4 +600,11 @@ def run() -> None:
 
 
 if __name__ == "__main__":
-    run()
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--migrate-only",
+        action="store_true",
+        help="Convert old Google Sheet history rows to the new schema without fetching live prices.",
+    )
+    args = parser.parse_args()
+    run(migrate_only=args.migrate_only)
