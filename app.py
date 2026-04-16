@@ -551,20 +551,58 @@ with tab3:
         st.info("Forecast sheet is empty.")
     else:
         forecast_df["Forecast Date"] = pd.to_datetime(forecast_df["Forecast Date"], errors="coerce")
-        forecast_df["Predicted Price"] = pd.to_numeric(forecast_df["Predicted Price"], errors="coerce")
+        forecast_df["Predicted Price"] = pd.to_numeric(forecast_df.get("Predicted Price"), errors="coerce")
+        if "Predicted Listings" in forecast_df.columns:
+            forecast_df["Predicted Listings"] = pd.to_numeric(forecast_df.get("Predicted Listings"), errors="coerce")
         target_skin_name = f"{family_selected} ({condition_selected})"
         forecast_view = forecast_df[forecast_df["Skin Name"] == target_skin_name].dropna()
         if forecast_view.empty:
             st.info("No forecast rows for this condition.")
         else:
-            forecast_chart = (
-                alt.Chart(forecast_view)
-                .mark_line(point=True, color="#49a078", strokeWidth=3)
-                .encode(
-                    x=alt.X("Forecast Date:T", title="Date"),
-                    y=alt.Y("Predicted Price:Q", title="Predicted Price (CNY)"),
-                    tooltip=["Forecast Date:T", "Predicted Price:Q"],
+            if "Predicted Listings" in forecast_view.columns:
+                price_forecast = (
+                    alt.Chart(forecast_view)
+                    .mark_line(point=True, color="#49a078", strokeWidth=3)
+                    .encode(
+                        x=alt.X("Forecast Date:T", title="Date"),
+                        y=alt.Y("Predicted Price:Q", title="Predicted Price (CNY)"),
+                        tooltip=["Forecast Date:T", "Predicted Price:Q", "Predicted Listings:Q", "Model:N"],
+                    )
+                    .properties(height=320)
                 )
-                .properties(height=320)
-            )
-            st.altair_chart(forecast_chart, use_container_width=True)
+                listings_forecast = (
+                    alt.Chart(forecast_view)
+                    .mark_bar(color="#5f7bd0", opacity=0.22)
+                    .encode(
+                        x=alt.X("Forecast Date:T", title="Date"),
+                        y=alt.Y(
+                            "Predicted Listings:Q",
+                            title="Predicted Sell Stock",
+                            axis=alt.Axis(orient="right"),
+                        ),
+                        tooltip=["Forecast Date:T", "Predicted Price:Q", "Predicted Listings:Q", "Model:N"],
+                    )
+                    .properties(height=320)
+                )
+                st.altair_chart(
+                    alt.layer(price_forecast, listings_forecast).resolve_scale(y="independent"),
+                    use_container_width=True,
+                )
+                show_cols = [col for col in ("Forecast Date", "Predicted Price", "Predicted Listings", "Model") if col in forecast_view.columns]
+                st.dataframe(
+                    forecast_view[show_cols].sort_values("Forecast Date"),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+            else:
+                forecast_chart = (
+                    alt.Chart(forecast_view)
+                    .mark_line(point=True, color="#49a078", strokeWidth=3)
+                    .encode(
+                        x=alt.X("Forecast Date:T", title="Date"),
+                        y=alt.Y("Predicted Price:Q", title="Predicted Price (CNY)"),
+                        tooltip=["Forecast Date:T", "Predicted Price:Q"],
+                    )
+                    .properties(height=320)
+                )
+                st.altair_chart(forecast_chart, use_container_width=True)

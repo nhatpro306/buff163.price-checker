@@ -20,6 +20,7 @@ import requests
 from google.oauth2 import service_account
 from requests.adapters import HTTPAdapter
 from statsmodels.tsa.arima.model import ARIMA
+from statsmodels.tsa.statespace.sarimax import SARIMAX
 from urllib3.util.retry import Retry
 
 
@@ -882,7 +883,7 @@ def rebuild_signals(store: SheetStore, analysis_rows: list[dict[str, Any]], time
 
 
 def rebuild_forecast(store: SheetStore, history: pd.DataFrame) -> None:
-    headers = ["Skin Name", "Forecast Date", "Predicted Price"]
+    headers = ["Skin Name", "Forecast Date", "Predicted Price", "Predicted Listings", "Model"]
     sheet = store.worksheet(FORECAST_SHEET_NAME, headers, rows=800, cols=10)
     sheet.clear()
     sheet.append_row(headers)
@@ -892,22 +893,66 @@ def rebuild_forecast(store: SheetStore, history: pd.DataFrame) -> None:
     prepared = history.copy()
     prepared["Timestamp"] = pd.to_datetime(prepared["Timestamp"], errors="coerce", utc=True)
     prepared["Price"] = pd.to_numeric(prepared["Price"], errors="coerce")
-    prepared = prepared.dropna(subset=["Timestamp", "Skin Name", "Price"])
+    prepared["Listings"] = pd.to_numeric(prepared.get("Listings"), errors="coerce")
+    prepared = prepared.dropna(subset=["Timestamp", "Skin Name", "Price", "Listings"])
 
     forecast_rows: list[list[Any]] = []
     for skin_name, skin_df in prepared.groupby("Skin Name"):
-        skin_df = skin_df.sort_values("Timestamp")
-        if len(skin_df) < 6:
+        skin_df = skin_df.sort_values("Timestamp").copy()
+        if len(skin_df) < 10:
             continue
+
+        daily = (
+            skin_df.set_index("Timestamp")[["Price", "Listings"]]
+            .resample("D")
+            .agg({"Price": "mean", "Listings": "last"})
+            .dropna()
+        )
+        if len(daily) < 8:
+            continue
+
+        y_price = daily["Price"].astype(float).values
+        y_listings = daily["Listings"].astype(float).values
+
         try:
-            model = ARIMA(skin_df["Price"].values, order=(1, 1, 1))
-            fitted = model.fit()
-            forecast = fitted.forecast(steps=7)
-            future_dates = pd.date_range(skin_df["Timestamp"].iloc[-1] + pd.Timedelta(days=1), periods=7, freq="D")
-            for forecast_date, predicted_price in zip(future_dates, forecast):
-                forecast_rows.append([skin_name, forecast_date.strftime("%Y-%m-%d"), round(float(predicted_price), 2)])
+            listings_model = ARIMA(y_listings, order=(1, 1, 1))
+            listings_fitted = listings_model.fit()
+            listings_forecast = listings_fitted.forecast(steps=7)
+            listings_forecast = [max(0, int(round(float(value)))) for value in listings_forecast]
+
+            price_model = SARIMAX(
+                y_price,
+                exog=y_listings,
+                order=(1, 1, 1),
+                enforce_stationarity=False,
+                enforce_invertibility=False,
+            )
+            price_fitted = price_model.fit(disp=False)
+            future_exog = pd.Series(listings_forecast, dtype=float).values
+            price_forecast = price_fitted.get_forecast(steps=7, exog=future_exog).predicted_mean
+            model_name = "SARIMAX(price~listings)+ARIMA(listings)"
         except Exception as exc:
-            print(f"Forecast skipped for {skin_name}: {exc}")
+            try:
+                price_model = ARIMA(y_price, order=(1, 1, 1))
+                price_fitted = price_model.fit()
+                price_forecast = price_fitted.forecast(steps=7)
+                listings_forecast = [int(round(float(y_listings[-1])))] * 7
+                model_name = "ARIMA(price)"
+            except Exception as inner_exc:
+                print(f"Forecast skipped for {skin_name}: {exc} / fallback failed: {inner_exc}")
+                continue
+
+        future_dates = pd.date_range(daily.index.max() + pd.Timedelta(days=1), periods=7, freq="D")
+        for forecast_date, predicted_price, predicted_listings in zip(future_dates, price_forecast, listings_forecast):
+            forecast_rows.append(
+                [
+                    skin_name,
+                    forecast_date.strftime("%Y-%m-%d"),
+                    round(float(predicted_price), 2),
+                    int(predicted_listings),
+                    model_name,
+                ]
+            )
 
     if forecast_rows:
         sheet.append_rows(forecast_rows, value_input_option="USER_ENTERED")
