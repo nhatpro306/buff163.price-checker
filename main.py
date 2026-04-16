@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import html
+import json
 import math
 import os
-import json
+import re
+import sqlite3
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,7 +17,7 @@ from typing import Any
 import gspread
 import pandas as pd
 import requests
-from oauth2client.service_account import ServiceAccountCredentials
+from google.oauth2 import service_account
 from requests.adapters import HTTPAdapter
 from statsmodels.tsa.arima.model import ARIMA
 from urllib3.util.retry import Retry
@@ -21,53 +25,92 @@ from urllib3.util.retry import Retry
 
 SHEET_NAME = os.getenv("BUFF_SHEET_NAME", "BuffKnifeTracker")
 LOG_SHEET_NAME = "HistoryLog"
+CATALOG_SHEET_NAME = "Catalog"
 DASHBOARD_SHEET_NAME = "Dashboard"
 FORECAST_SHEET_NAME = "Forecast"
 SIGNALS_SHEET_NAME = "Signals"
+DEFAULT_BUTTERFLY_SEEDS = ["42552", "42555", "42533", "42587"]
+DEFAULT_KARAMBIT_SEEDS = ["42901", "42905", "42911", "42909"]
+DEFAULT_TRACK_KEYWORDS = ["Butterfly Knife", "Karambit"]
+DEFAULT_SQLITE_PATH = "buff163.sqlite3"
+
 HISTORY_HEADERS = [
     "Timestamp",
     "Goods ID",
+    "Family",
     "Knife Type",
     "Skin Name",
     "Condition",
     "Price",
     "Listings",
+    "Buy Orders",
+    "Reference Price",
+    "Image URL",
     "Observed Orders",
 ]
+CATALOG_HEADERS = [
+    "Goods ID",
+    "Family",
+    "Skin Name",
+    "Condition",
+    "Price",
+    "Listings",
+    "Buy Orders",
+    "Reference Price",
+    "Image URL",
+]
+
+QUALITY_MAP = {
+    "崭新出厂": "Factory New",
+    "略有磨损": "Minimal Wear",
+    "久经沙场": "Field-Tested",
+    "破损不堪": "Well-Worn",
+    "战痕累累": "Battle-Scarred",
+    "★ StatTrak™": "StatTrak",
+    "StatTrak™": "StatTrak",
+}
+CONDITION_ORDER = {
+    "Factory New": 0,
+    "Minimal Wear": 1,
+    "Field-Tested": 2,
+    "Well-Worn": 3,
+    "Battle-Scarred": 4,
+    "StatTrak": 5,
+    "Unknown": 99,
+}
 
 
 @dataclass(frozen=True)
-class SkinConfig:
+class MarketSnapshot:
     goods_id: str
-    name: str
+    family: str
+    skin_name: str
     condition: str
+    price: float
+    listings: int
+    buy_orders: int
+    reference_price: float | None
+    image_url: str
+    observed_orders: int
 
     @property
     def knife_type(self) -> str:
-        return self.name.split(" | ")[0].strip()
-
-
-SKINS: list[SkinConfig] = [
-    SkinConfig(goods_id="42552", name="Butterfly | Damascus Steel", condition="Field-Tested"),
-    SkinConfig(goods_id="42555", name="Butterfly | Doppler", condition="Factory New"),
-    SkinConfig(goods_id="42998", name="Karambit | Doppler", condition="Factory New"),
-    SkinConfig(goods_id="42533", name="Butterfly | Blue Steel", condition="Field-Tested"),
-    SkinConfig(goods_id="83578", name="Gloves | Nocts", condition="Field-Tested"),
-    SkinConfig(goods_id="42587", name="Butterfly | Tiger Tooth", condition="Factory New"),
-]
-SKIN_BY_NAME = {skin.name: skin for skin in SKINS}
+        return self.family.split("|")[0].replace("★", "").strip()
 
 
 class BuffPriceClient:
-    BASE_URL = "https://buff.163.com/api/market/goods/sell_order"
+    SELL_ORDER_URL = "https://buff.163.com/api/market/goods/sell_order"
+    GOODS_MARKET_URL = "https://buff.163.com/api/market/goods"
+    GOODS_PAGE_URL = "https://buff.163.com/goods/{goods_id}?from=market#tab=selling"
 
     def __init__(self, timeout: int = 20) -> None:
         self.timeout = timeout
         self.session = requests.Session()
+        self.page_cache: dict[str, dict[str, Any]] = {}
         retry = Retry(
-            total=4,
-            backoff_factor=1.2,
-            status_forcelist=(429, 500, 502, 503, 504),
+            total=2,
+            backoff_factor=0.7,
+            status_forcelist=(500, 502, 503, 504),
             allowed_methods=("GET",),
         )
         self.session.mount("https://", HTTPAdapter(max_retries=retry))
@@ -87,38 +130,210 @@ class BuffPriceClient:
         if cookie:
             self.session.headers["Cookie"] = cookie
 
-    def fetch_sell_snapshot(self, skin: SkinConfig) -> dict[str, Any]:
-        params = {
-            "game": "csgo",
-            "goods_id": skin.goods_id,
-            "page_num": 1,
-            "sort_by": "default",
-        }
-        response = self.session.get(self.BASE_URL, params=params, timeout=self.timeout)
-        response.raise_for_status()
+    def _get(self, url: str, **kwargs: Any) -> requests.Response:
+        max_attempts = 5
+        for attempt in range(max_attempts):
+            response = self.session.get(url, timeout=self.timeout, **kwargs)
+            if response.status_code != 429:
+                return response
+            backoff_seconds = min(2.0 + attempt * 1.5, 8.0)
+            time.sleep(backoff_seconds)
+        return response
 
+    def fetch_sell_snapshot(self, goods_id: str, page_meta: dict[str, Any] | None = None) -> MarketSnapshot:
+        response = self._get(
+            self.SELL_ORDER_URL,
+            params={
+                "game": "csgo",
+                "goods_id": goods_id,
+                "page_num": 1,
+                "sort_by": "default",
+            },
+        )
+        response.raise_for_status()
         payload = response.json()
-        if payload.get("code") not in (None, "OK") and payload.get("code") != "OK":
+        if payload.get("code") != "OK":
             raise ValueError(f"BUFF API returned error code: {payload.get('code')}")
 
         data = payload.get("data") or {}
         items = data.get("items") or []
-        if not items:
+        goods_infos = data.get("goods_infos") or {}
+        info = goods_infos.get(str(goods_id)) or {}
+        if not items or not info:
             raise ValueError("BUFF API returned no sell orders.")
 
-        best_order = items[0]
-        price = float(best_order["price"])
-        sell_count = int(data.get("total_count") or len(items))
+        page_meta = page_meta or self.fetch_goods_page_metadata(goods_id)
+        market_hash_name = info.get("market_hash_name") or info.get("name") or f"Goods {goods_id}"
+        family, condition = split_market_name(market_hash_name)
 
-        return {
-            "goods_id": skin.goods_id,
-            "knife_type": skin.knife_type,
-            "skin_name": skin.name,
-            "condition": skin.condition,
-            "price": round(price, 2),
-            "sell_count": sell_count,
-            "sample_size": len(items),
-        }
+        return MarketSnapshot(
+            goods_id=str(goods_id),
+            family=family,
+            skin_name=f"{family} ({condition})" if condition and condition not in family else family,
+            condition=condition or "Unknown",
+            price=float(items[0]["price"]),
+            listings=int(page_meta.get("sell_num") or data.get("total_count") or len(items)),
+            buy_orders=int(page_meta.get("buy_num") or 0),
+            reference_price=try_float(info.get("steam_price_cny")),
+            image_url=(
+                info.get("icon_url")
+                or info.get("original_icon_url")
+                or page_meta.get("icon_url")
+                or page_meta.get("image_url")
+                or ""
+            ),
+            observed_orders=len(items),
+        )
+
+    def fetch_goods_page_metadata(self, goods_id: str) -> dict[str, Any]:
+        goods_id = str(goods_id)
+        if goods_id in self.page_cache:
+            return self.page_cache[goods_id]
+
+        response = self._get(self.GOODS_PAGE_URL.format(goods_id=goods_id))
+        response.raise_for_status()
+        page = response.text
+
+        goods_info_match = re.search(r"var goods_info = (\{.*?\})\s*market_show\.pre_init", page, re.DOTALL)
+        page_info: dict[str, Any] = {}
+        if goods_info_match:
+            page_info = json.loads(goods_info_match.group(1))
+        image_match = re.search(r'<meta property="og:image" content="([^"]+)"', page)
+        if image_match:
+            page_info["image_url"] = image_match.group(1)
+
+        top_segment_end = page.find('<div class="market-header black"')
+        top_segment = page[:top_segment_end] if top_segment_end != -1 else page
+        variant_ids: list[str] = []
+        for match in re.finditer(
+            r'<a class="[^"]*i_Btn[^"]*"[^>]*data-goodsid="(\d+)"[^>]*>(.*?)</a>',
+            top_segment,
+            re.DOTALL,
+        ):
+            inner_text = clean_html_text(match.group(2))
+            if inner_text:
+                variant_ids.append(match.group(1))
+
+        page_info["variant_goods_ids"] = sorted(set(variant_ids + [goods_id]))
+        self.page_cache[goods_id] = page_info
+        return page_info
+
+    def discover_butterfly_catalog(self, seed_goods_ids: list[str]) -> list[MarketSnapshot]:
+        queue = [str(goods_id) for goods_id in seed_goods_ids]
+        seen: set[str] = set()
+        snapshots: dict[str, MarketSnapshot] = {}
+
+        while queue:
+            goods_id = queue.pop(0)
+            if goods_id in seen:
+                continue
+            seen.add(goods_id)
+
+            try:
+                page_info = self.fetch_goods_page_metadata(goods_id)
+            except Exception as exc:
+                print(f"Failed to parse goods page {goods_id}: {exc}")
+                continue
+
+            for variant_id in page_info.get("variant_goods_ids", []):
+                if variant_id not in seen and variant_id not in queue:
+                    queue.append(variant_id)
+
+            try:
+                snapshot = self.fetch_sell_snapshot(goods_id, page_meta=page_info)
+            except Exception as exc:
+                print(f"Failed to fetch goods {goods_id}: {exc}")
+                continue
+
+            if "Butterfly Knife" in snapshot.family:
+                snapshots[goods_id] = snapshot
+            time.sleep(0.35)
+
+        return sorted(snapshots.values(), key=lambda item: (item.family, item.condition, item.goods_id))
+
+    def discover_high_value_catalog(
+        self,
+        *,
+        keywords: list[str],
+        min_price: float,
+        seed_goods_ids: list[str] | None = None,
+        max_pages_per_keyword: int = 20,
+    ) -> list[MarketSnapshot]:
+        queue = [str(goods_id) for goods_id in (seed_goods_ids or []) if str(goods_id).strip()]
+        for keyword in keywords:
+            queue.extend(self.discover_goods_ids_from_market(keyword=keyword, max_pages=max_pages_per_keyword))
+        queue = sorted(set(queue))
+
+        seen: set[str] = set()
+        snapshots: dict[str, MarketSnapshot] = {}
+        keyword_lower = tuple(keyword.lower() for keyword in keywords)
+
+        while queue:
+            goods_id = queue.pop(0)
+            if goods_id in seen:
+                continue
+            seen.add(goods_id)
+
+            try:
+                page_info = self.fetch_goods_page_metadata(goods_id)
+            except Exception as exc:
+                print(f"Failed to parse goods page {goods_id}: {exc}")
+                continue
+
+            for variant_id in page_info.get("variant_goods_ids", []):
+                if variant_id not in seen and variant_id not in queue:
+                    queue.append(variant_id)
+
+            try:
+                snapshot = self.fetch_sell_snapshot(goods_id, page_meta=page_info)
+            except Exception as exc:
+                print(f"Failed to fetch goods {goods_id}: {exc}")
+                continue
+
+            family_lower = snapshot.family.lower()
+            if snapshot.price >= min_price and any(keyword in family_lower for keyword in keyword_lower):
+                snapshots[goods_id] = snapshot
+            time.sleep(0.35)
+
+        return sorted(
+            snapshots.values(),
+            key=lambda item: (item.family, CONDITION_ORDER.get(item.condition, 50), item.goods_id),
+        )
+
+    def discover_goods_ids_from_market(self, *, keyword: str, max_pages: int = 20) -> list[str]:
+        goods_ids: set[str] = set()
+        for page_num in range(1, max_pages + 1):
+            response = self._get(
+                self.GOODS_MARKET_URL,
+                params={
+                    "game": "csgo",
+                    "search": keyword,
+                    "page_num": page_num,
+                    "page_size": 80,
+                    "sort_by": "price.desc",
+                    "sort_order": "desc",
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+            if payload.get("code") != "OK":
+                break
+            data = payload.get("data") or {}
+            items = data.get("items") or []
+            if not items:
+                break
+
+            for item in items:
+                goods_id = item.get("id") or item.get("goods_id")
+                if goods_id:
+                    goods_ids.add(str(goods_id))
+
+            total_page = int(data.get("total_page") or 0)
+            if total_page and page_num >= total_page:
+                break
+            time.sleep(0.2)
+
+        return sorted(goods_ids)
 
 
 class SheetStore:
@@ -131,7 +346,7 @@ class SheetStore:
         self.client = gspread.authorize(creds)
         self.spreadsheet = self.client.open(sheet_name)
 
-    def worksheet(self, title: str, headers: list[str], rows: int = 1000, cols: int = 20):
+    def worksheet(self, title: str, headers: list[str], rows: int = 2000, cols: int = 20):
         try:
             sheet = self.spreadsheet.worksheet(title)
         except gspread.WorksheetNotFound:
@@ -144,133 +359,132 @@ class SheetStore:
         return normalize_history_values(sheet.get_all_values()).to_dict("records")
 
 
-def resolve_credentials_path() -> Path:
-    env_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-    if env_path and Path(env_path).exists():
-        return Path(env_path)
+def sqlite_connect(db_path: str) -> sqlite3.Connection:
+    conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA foreign_keys=ON;")
+    return conn
 
-    candidates = [
-        Path("credentials.json"),
-        Path(__file__).resolve().parent / "credentials.json",
-        Path(__file__).resolve().parent.parent / "credentials.json",
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
 
-    raise FileNotFoundError(
-        "credentials.json was not found. Put it next to main.py, one folder above it, or set GOOGLE_APPLICATION_CREDENTIALS."
+def sqlite_init(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS goods (
+            goods_id TEXT PRIMARY KEY,
+            family TEXT NOT NULL,
+            knife_type TEXT NOT NULL,
+            skin_name TEXT NOT NULL,
+            condition TEXT NOT NULL,
+            reference_price REAL,
+            image_url TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts TEXT NOT NULL,
+            goods_id TEXT NOT NULL REFERENCES goods(goods_id) ON DELETE CASCADE,
+            price REAL NOT NULL,
+            listings INTEGER NOT NULL,
+            buy_orders INTEGER NOT NULL,
+            observed_orders INTEGER NOT NULL,
+            UNIQUE(ts, goods_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_snapshots_goods_ts ON snapshots(goods_id, ts);
+        CREATE INDEX IF NOT EXISTS idx_snapshots_ts ON snapshots(ts);
+        """
     )
 
 
-def load_google_credentials(scope: list[str]) -> ServiceAccountCredentials:
-    raw_json = os.getenv("GSHEET_CREDS_JSON")
-    if raw_json:
-        return ServiceAccountCredentials.from_json_keyfile_dict(json.loads(raw_json), scope)
+def sqlite_upsert_snapshot(
+    conn: sqlite3.Connection,
+    *,
+    timestamp: str,
+    snapshot: MarketSnapshot,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO goods(goods_id, family, knife_type, skin_name, condition, reference_price, image_url)
+        VALUES(?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(goods_id) DO UPDATE SET
+            family=excluded.family,
+            knife_type=excluded.knife_type,
+            skin_name=excluded.skin_name,
+            condition=excluded.condition,
+            reference_price=excluded.reference_price,
+            image_url=excluded.image_url;
+        """,
+        (
+            snapshot.goods_id,
+            snapshot.family,
+            snapshot.knife_type,
+            snapshot.skin_name,
+            snapshot.condition,
+            snapshot.reference_price,
+            snapshot.image_url,
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO snapshots(ts, goods_id, price, listings, buy_orders, observed_orders)
+        VALUES(?, ?, ?, ?, ?, ?)
+        ON CONFLICT(ts, goods_id) DO UPDATE SET
+            price=excluded.price,
+            listings=excluded.listings,
+            buy_orders=excluded.buy_orders,
+            observed_orders=excluded.observed_orders;
+        """,
+        (
+            timestamp,
+            snapshot.goods_id,
+            snapshot.price,
+            snapshot.listings,
+            snapshot.buy_orders,
+            snapshot.observed_orders,
+        ),
+    )
 
-    raw_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
-    if raw_path:
-        return ServiceAccountCredentials.from_json_keyfile_dict(json.loads(raw_path), scope)
 
+def sqlite_write_snapshots(db_path: str, snapshots: list[MarketSnapshot], timestamp: str) -> None:
+    if not snapshots:
+        return
+    conn = sqlite_connect(db_path)
     try:
-        import streamlit as st
-
-        if "GSHEET_CREDS_JSON" in st.secrets:
-            return ServiceAccountCredentials.from_json_keyfile_dict(
-                json.loads(st.secrets["GSHEET_CREDS_JSON"]),
-                scope,
-            )
-
-        if "gcp_service_account" in st.secrets:
-            return ServiceAccountCredentials.from_json_keyfile_dict(
-                dict(st.secrets["gcp_service_account"]),
-                scope,
-            )
-    except Exception:
-        pass
-
-    return ServiceAccountCredentials.from_json_keyfile_name(str(resolve_credentials_path()), scope)
+        sqlite_init(conn)
+        with conn:
+            for snapshot in snapshots:
+                sqlite_upsert_snapshot(conn, timestamp=timestamp, snapshot=snapshot)
+    finally:
+        conn.close()
 
 
-def normalize_history_values(raw_values: list[list[Any]]) -> pd.DataFrame:
-    if not raw_values:
+def sqlite_load_history_frame(db_path: str) -> pd.DataFrame:
+    if not Path(db_path).exists():
         return pd.DataFrame(columns=HISTORY_HEADERS)
-
-    headers = [str(cell).strip() for cell in raw_values[0]]
-    rows = raw_values[1:]
-    if not headers:
-        return pd.DataFrame(columns=HISTORY_HEADERS)
-
-    def find_index(*candidates: str) -> int | None:
-        lowered = [header.lower() for header in headers]
-        for candidate in candidates:
-            candidate_lower = candidate.lower()
-            for idx, header in enumerate(lowered):
-                if header == candidate_lower:
-                    return idx
-            for idx, header in enumerate(lowered):
-                if candidate_lower in header:
-                    return idx
-        return None
-
-    timestamp_idx = find_index("Timestamp")
-    goods_id_idx = find_index("Goods ID", "GoodsId")
-    knife_type_idx = find_index("Knife Type", "Knife")
-    skin_name_idx = find_index("Skin Name", "Skin")
-    condition_idx = find_index("Condition")
-    price_idx = find_index("Price")
-    listings_idx = find_index("Listings", "Sell Listings")
-    observed_orders_idx = find_index("Observed Orders", "Sample Size", "Observed")
-
-    normalized_rows: list[dict[str, Any]] = []
-    for row in rows:
-        if not any(str(cell).strip() for cell in row):
-            continue
-
-        def cell(idx: int | None) -> str:
-            if idx is None or idx >= len(row):
-                return ""
-            return str(row[idx]).strip()
-
-        skin_name = cell(skin_name_idx)
-        skin_config = SKIN_BY_NAME.get(skin_name)
-        knife_type = cell(knife_type_idx) or (skin_config.knife_type if skin_config else skin_name.split(" | ")[0].strip())
-        normalized_rows.append(
-            {
-                "Timestamp": cell(timestamp_idx),
-                "Goods ID": cell(goods_id_idx) or (skin_config.goods_id if skin_config else ""),
-                "Knife Type": knife_type,
-                "Skin Name": skin_name,
-                "Condition": cell(condition_idx) or (skin_config.condition if skin_config else ""),
-                "Price": cell(price_idx).replace(",", "."),
-                "Listings": cell(listings_idx),
-                "Observed Orders": cell(observed_orders_idx),
-            }
-        )
-
-    return pd.DataFrame(normalized_rows, columns=HISTORY_HEADERS)
-
-
-def migrate_history_sheet(store: SheetStore) -> int:
-    history_sheet = store.worksheet(LOG_SHEET_NAME, HISTORY_HEADERS)
-    raw_values = history_sheet.get_all_values()
-
-    if not raw_values:
-        history_sheet.clear()
-        history_sheet.append_row(HISTORY_HEADERS)
-        return 0
-
-    current_headers = [str(cell).strip() for cell in raw_values[0]]
-    normalized = normalize_history_values(raw_values)
-
-    if current_headers == HISTORY_HEADERS and len(normalized) == max(len(raw_values) - 1, 0):
-        return 0
-
-    history_sheet.clear()
-    history_sheet.append_row(HISTORY_HEADERS)
-    if not normalized.empty:
-        history_sheet.append_rows(normalized.values.tolist(), value_input_option="USER_ENTERED")
-    return len(normalized)
+    conn = sqlite_connect(db_path)
+    try:
+        query = """
+        SELECT
+            s.ts AS "Timestamp",
+            g.goods_id AS "Goods ID",
+            g.family AS "Family",
+            g.knife_type AS "Knife Type",
+            g.skin_name AS "Skin Name",
+            g.condition AS "Condition",
+            s.price AS "Price",
+            s.listings AS "Listings",
+            s.buy_orders AS "Buy Orders",
+            g.reference_price AS "Reference Price",
+            g.image_url AS "Image URL",
+            s.observed_orders AS "Observed Orders"
+        FROM snapshots s
+        JOIN goods g ON g.goods_id = s.goods_id
+        ORDER BY s.ts ASC;
+        """
+        frame = pd.read_sql_query(query, conn)
+    finally:
+        conn.close()
+    return frame.reindex(columns=HISTORY_HEADERS)
 
 
 class PriceAnalysisAgent:
@@ -291,15 +505,12 @@ class PriceAnalysisAgent:
         listings = skin_history["Listings"].tolist()
         latest_price = prices[-1]
         baseline_price = mean(prices[:-1]) if len(prices) > 1 else latest_price
+        avg_price = mean(prices)
         min_price = min(prices)
         max_price = max(prices)
-        avg_price = mean(prices)
         price_stddev = pstdev(prices) if len(prices) > 1 else 0.0
         volatility_pct = (price_stddev / avg_price * 100) if avg_price else 0.0
         price_change_pct = ((latest_price - baseline_price) / baseline_price * 100) if baseline_price else 0.0
-
-        recent_window = prices[-3:] if len(prices) >= 3 else prices
-        short_term_avg = mean(recent_window)
         listing_avg = mean(listings)
         latest_listings = listings[-1]
         listing_pressure_pct = ((latest_listings - listing_avg) / listing_avg * 100) if listing_avg else 0.0
@@ -307,7 +518,6 @@ class PriceAnalysisAgent:
         signal, confidence, rationale = self._classify(
             latest_price=latest_price,
             avg_price=avg_price,
-            short_term_avg=short_term_avg,
             min_price=min_price,
             max_price=max_price,
             latest_listings=latest_listings,
@@ -336,7 +546,6 @@ class PriceAnalysisAgent:
         *,
         latest_price: float,
         avg_price: float,
-        short_term_avg: float,
         min_price: float,
         max_price: float,
         latest_listings: float,
@@ -350,47 +559,210 @@ class PriceAnalysisAgent:
         near_floor = math.isclose(latest_price, min_price, rel_tol=0.01) or latest_price <= min_price * 1.03
         near_ceiling = math.isclose(latest_price, max_price, rel_tol=0.01) or latest_price >= max_price * 0.97
 
-        confidence = 0.45
         if undervalued and listing_spike:
-            confidence = 0.79
-            return (
-                "BUY_WATCH",
-                confidence,
-                "Price is below its historical average while listings are elevated, which can signal short-term oversupply.",
-            )
+            return ("BUY_WATCH", 0.79, "Price is below its average while stock is elevated.")
         if overvalued and listing_drop:
-            confidence = 0.76
-            return (
-                "SELL_WATCH",
-                confidence,
-                "Price is above its historical average and listings are tightening, which can indicate a stretched market.",
-            )
-        if near_floor and latest_price <= short_term_avg:
-            confidence = 0.67
-            return (
-                "ACCUMULATE",
-                confidence,
-                "Price is trading near the lower end of its observed range without overheating above the recent average.",
-            )
-        if near_ceiling and latest_price >= short_term_avg:
-            confidence = 0.66
-            return (
-                "TAKE_PROFIT",
-                confidence,
-                "Price is near the top of the observed range and already above the recent average.",
-            )
+            return ("SELL_WATCH", 0.76, "Price is above its average while sell-side stock is tightening.")
+        if near_floor:
+            return ("ACCUMULATE", 0.67, "Price is near the observed floor for this condition.")
+        if near_ceiling:
+            return ("TAKE_PROFIT", 0.66, "Price is near the observed ceiling for this condition.")
         if volatility_pct >= 8:
-            confidence = 0.58
-            return (
-                "HIGH_VOLATILITY",
-                confidence,
-                "Price swings are elevated, so waiting for a cleaner setup is safer than reacting to one snapshot.",
-            )
-        return (
-            "HOLD",
-            confidence,
-            "Current price and listing depth are close to their recent baseline, so there is no strong edge yet.",
+            return ("HIGH_VOLATILITY", 0.58, "Price swings are elevated relative to the average.")
+        return ("HOLD", 0.45, "Current price and listing depth are near the recent baseline.")
+
+
+def resolve_credentials_path() -> Path:
+    env_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    if env_path and Path(env_path).exists():
+        return Path(env_path)
+
+    candidates = [
+        Path("credentials.json"),
+        Path(__file__).resolve().parent / "credentials.json",
+        Path(__file__).resolve().parent.parent / "credentials.json",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+
+    raise FileNotFoundError("credentials.json was not found.")
+
+
+def credentials_from_info(info: dict[str, Any], scope: list[str]) -> service_account.Credentials:
+    normalized = dict(info)
+    private_key = normalized.get("private_key")
+    if isinstance(private_key, str):
+        normalized["private_key"] = private_key.replace("\\n", "\n").replace("\r\n", "\n")
+    return service_account.Credentials.from_service_account_info(normalized, scopes=scope)
+
+
+def load_google_credentials(scope: list[str]) -> service_account.Credentials:
+    raw_json = os.getenv("GSHEET_CREDS_JSON")
+    if raw_json:
+        return credentials_from_info(json.loads(raw_json), scope)
+
+    raw_json = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+    if raw_json:
+        return credentials_from_info(json.loads(raw_json), scope)
+
+    try:
+        import streamlit as st
+
+        if "GSHEET_CREDS_JSON" in st.secrets:
+            return credentials_from_info(json.loads(st.secrets["GSHEET_CREDS_JSON"]), scope)
+        if "gcp_service_account" in st.secrets:
+            return credentials_from_info(dict(st.secrets["gcp_service_account"]), scope)
+    except Exception:
+        pass
+
+    return service_account.Credentials.from_service_account_file(
+        str(resolve_credentials_path()),
+        scopes=scope,
+    )
+
+
+def try_float(value: Any) -> float | None:
+    try:
+        if value in (None, ""):
+            return None
+        return float(str(value).replace(",", ""))
+    except Exception:
+        return None
+
+
+def split_market_name(name: str) -> tuple[str, str]:
+    cleaned = name.replace("★ ", "").strip()
+    match = re.match(r"(.+?) \((.+)\)$", cleaned)
+    if not match:
+        return cleaned, ""
+    return match.group(1).strip(), match.group(2).strip()
+
+
+def canonicalize_family_name(name: str) -> str:
+    value = (name or "").strip().replace("★ ", "")
+    if value.startswith("Butterfly | "):
+        return value.replace("Butterfly | ", "Butterfly Knife | ", 1)
+    if value.startswith("StatTrak™ Butterfly | "):
+        return value.replace("StatTrak™ Butterfly | ", "StatTrak™ Butterfly Knife | ", 1)
+    return value
+
+
+def clean_html_text(raw_html: str) -> str:
+    text = re.sub(r"<[^>]+>", " ", raw_html)
+    text = html.unescape(text)
+    text = re.sub(r"\s+", " ", text).strip()
+    for cn, en in QUALITY_MAP.items():
+        text = text.replace(cn, en)
+    return text
+
+
+def parse_family_and_condition(row: dict[str, Any]) -> tuple[str, str]:
+    family = str(row.get("Family") or "").strip()
+    condition = str(row.get("Condition") or "").strip()
+    skin_name = str(row.get("Skin Name") or "").strip()
+    family = canonicalize_family_name(family)
+    skin_name = canonicalize_family_name(skin_name)
+    if family and condition:
+        return family, condition
+    if skin_name:
+        derived_family, derived_condition = split_market_name(skin_name)
+        return canonicalize_family_name(family or derived_family), condition or derived_condition
+    return family, condition
+
+
+def normalize_history_values(raw_values: list[list[Any]]) -> pd.DataFrame:
+    if not raw_values:
+        return pd.DataFrame(columns=HISTORY_HEADERS)
+
+    headers = [str(cell).strip() for cell in raw_values[0]]
+    rows = raw_values[1:]
+
+    def find_index(*candidates: str) -> int | None:
+        lowered = [header.lower() for header in headers]
+        for candidate in candidates:
+            candidate_lower = candidate.lower()
+            for idx, header in enumerate(lowered):
+                if header == candidate_lower:
+                    return idx
+            for idx, header in enumerate(lowered):
+                if candidate_lower in header:
+                    return idx
+        return None
+
+    timestamp_idx = find_index("Timestamp")
+    goods_id_idx = find_index("Goods ID", "GoodsId")
+    family_idx = find_index("Family")
+    knife_type_idx = find_index("Knife Type", "Knife")
+    skin_name_idx = find_index("Skin Name", "Skin")
+    condition_idx = find_index("Condition")
+    price_idx = find_index("Price")
+    listings_idx = find_index("Listings", "Sell Listings")
+    buy_orders_idx = find_index("Buy Orders", "Buy Order")
+    reference_price_idx = find_index("Reference Price", "Steam Price")
+    image_url_idx = find_index("Image URL", "Icon URL")
+    observed_orders_idx = find_index("Observed Orders", "Sample Size", "Observed")
+
+    normalized_rows: list[dict[str, Any]] = []
+    for row in rows:
+        if not any(str(cell).strip() for cell in row):
+            continue
+
+        def cell(idx: int | None) -> str:
+            if idx is None or idx >= len(row):
+                return ""
+            return str(row[idx]).strip()
+
+        normalized = {
+            "Timestamp": cell(timestamp_idx),
+            "Goods ID": cell(goods_id_idx),
+            "Family": cell(family_idx),
+            "Knife Type": cell(knife_type_idx),
+            "Skin Name": cell(skin_name_idx),
+            "Condition": cell(condition_idx),
+            "Price": cell(price_idx).replace(",", "."),
+            "Listings": cell(listings_idx),
+            "Buy Orders": cell(buy_orders_idx),
+            "Reference Price": cell(reference_price_idx),
+            "Image URL": cell(image_url_idx),
+            "Observed Orders": cell(observed_orders_idx),
+        }
+        family, condition = parse_family_and_condition(normalized)
+        normalized["Family"] = family
+        normalized["Condition"] = condition
+        if not normalized["Knife Type"] and family:
+            normalized["Knife Type"] = family.split("|")[0].strip()
+        if family and condition:
+            normalized["Skin Name"] = f"{family} ({condition})"
+        elif family:
+            normalized["Skin Name"] = family
+        normalized_rows.append(normalized)
+
+    return pd.DataFrame(normalized_rows, columns=HISTORY_HEADERS)
+
+
+def migrate_history_sheet(store: SheetStore) -> int:
+    history_sheet = store.worksheet(LOG_SHEET_NAME, HISTORY_HEADERS)
+    raw_values = history_sheet.get_all_values()
+    if not raw_values:
+        history_sheet.clear()
+        history_sheet.append_row(HISTORY_HEADERS)
+        return 0
+
+    normalized = normalize_history_values(raw_values)
+    if not normalized.empty:
+        normalized["Timestamp"] = pd.to_datetime(normalized["Timestamp"], errors="coerce", utc=True)
+        normalized = normalized.sort_values(["Timestamp", "Goods ID", "Price", "Listings"], na_position="last")
+        normalized = normalized.drop_duplicates(
+            subset=["Timestamp", "Goods ID", "Family", "Condition", "Price", "Listings"],
+            keep="last",
         )
+        normalized["Timestamp"] = normalized["Timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S")
+    history_sheet.clear()
+    history_sheet.append_row(HISTORY_HEADERS)
+    if not normalized.empty:
+        history_sheet.append_rows(normalized.values.tolist(), value_input_option="USER_ENTERED")
+    return len(normalized)
 
 
 def load_history_frame(store: SheetStore) -> pd.DataFrame:
@@ -400,65 +772,73 @@ def load_history_frame(store: SheetStore) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=HISTORY_HEADERS)
 
 
-def append_history(store: SheetStore, snapshots: list[dict[str, Any]], timestamp: str) -> None:
+def append_history(store: SheetStore, snapshots: list[MarketSnapshot], timestamp: str) -> None:
     if not snapshots:
         return
-
-    sheet = store.worksheet(
-        LOG_SHEET_NAME,
-        HISTORY_HEADERS,
-    )
+    sheet = store.worksheet(LOG_SHEET_NAME, HISTORY_HEADERS)
     rows = [
         [
             timestamp,
-            snapshot["goods_id"],
-            snapshot["knife_type"],
-            snapshot["skin_name"],
-            snapshot["condition"],
-            snapshot["price"],
-            snapshot["sell_count"],
-            snapshot["sample_size"],
+            snapshot.goods_id,
+            snapshot.family,
+            snapshot.knife_type,
+            snapshot.skin_name,
+            snapshot.condition,
+            snapshot.price,
+            snapshot.listings,
+            snapshot.buy_orders,
+            snapshot.reference_price or "",
+            snapshot.image_url,
+            snapshot.observed_orders,
         ]
         for snapshot in snapshots
     ]
     sheet.append_rows(rows, value_input_option="USER_ENTERED")
 
 
+def rebuild_catalog(store: SheetStore, snapshots: list[MarketSnapshot]) -> None:
+    sheet = store.worksheet(CATALOG_SHEET_NAME, CATALOG_HEADERS)
+    sheet.clear()
+    sheet.append_row(CATALOG_HEADERS)
+    if snapshots:
+        sheet.append_rows(
+            [
+                [
+                    snapshot.goods_id,
+                    snapshot.family,
+                    snapshot.skin_name,
+                    snapshot.condition,
+                    snapshot.price,
+                    snapshot.listings,
+                    snapshot.buy_orders,
+                    snapshot.reference_price or "",
+                    snapshot.image_url,
+                ]
+                for snapshot in snapshots
+            ],
+            value_input_option="USER_ENTERED",
+        )
+
+
 def rebuild_dashboard(store: SheetStore, analysis_rows: list[dict[str, Any]]) -> None:
-    dashboard = store.worksheet(
-        DASHBOARD_SHEET_NAME,
-        [
-            "Skin Name",
-            "Latest Price",
-            "Average Price",
-            "Min Price",
-            "Max Price",
-            "Price Change %",
-            "Volatility %",
-            "Latest Listings",
-            "Listing Pressure %",
-            "Signal",
-            "Confidence",
-        ],
-    )
-    dashboard.clear()
-    dashboard.append_row(
-        [
-            "Skin Name",
-            "Latest Price",
-            "Average Price",
-            "Min Price",
-            "Max Price",
-            "Price Change %",
-            "Volatility %",
-            "Latest Listings",
-            "Listing Pressure %",
-            "Signal",
-            "Confidence",
-        ]
-    )
+    headers = [
+        "Skin Name",
+        "Latest Price",
+        "Average Price",
+        "Min Price",
+        "Max Price",
+        "Price Change %",
+        "Volatility %",
+        "Latest Listings",
+        "Listing Pressure %",
+        "Signal",
+        "Confidence",
+    ]
+    sheet = store.worksheet(DASHBOARD_SHEET_NAME, headers)
+    sheet.clear()
+    sheet.append_row(headers)
     if analysis_rows:
-        dashboard.append_rows(
+        sheet.append_rows(
             [
                 [
                     row["skin_name"],
@@ -480,23 +860,12 @@ def rebuild_dashboard(store: SheetStore, analysis_rows: list[dict[str, Any]]) ->
 
 
 def rebuild_signals(store: SheetStore, analysis_rows: list[dict[str, Any]], timestamp: str) -> None:
-    signals = store.worksheet(
-        SIGNALS_SHEET_NAME,
-        [
-            "Timestamp",
-            "Skin Name",
-            "Signal",
-            "Confidence",
-            "Rationale",
-            "Data Points",
-        ],
-    )
-    signals.clear()
-    signals.append_row(
-        ["Timestamp", "Skin Name", "Signal", "Confidence", "Rationale", "Data Points"]
-    )
+    headers = ["Timestamp", "Skin Name", "Signal", "Confidence", "Rationale", "Data Points"]
+    sheet = store.worksheet(SIGNALS_SHEET_NAME, headers)
+    sheet.clear()
+    sheet.append_row(headers)
     if analysis_rows:
-        signals.append_rows(
+        sheet.append_rows(
             [
                 [
                     timestamp,
@@ -513,15 +882,10 @@ def rebuild_signals(store: SheetStore, analysis_rows: list[dict[str, Any]], time
 
 
 def rebuild_forecast(store: SheetStore, history: pd.DataFrame) -> None:
-    forecast_sheet = store.worksheet(
-        FORECAST_SHEET_NAME,
-        ["Skin Name", "Forecast Date", "Predicted Price"],
-        rows=500,
-        cols=10,
-    )
-    forecast_sheet.clear()
-    forecast_sheet.append_row(["Skin Name", "Forecast Date", "Predicted Price"])
-
+    headers = ["Skin Name", "Forecast Date", "Predicted Price"]
+    sheet = store.worksheet(FORECAST_SHEET_NAME, headers, rows=800, cols=10)
+    sheet.clear()
+    sheet.append_row(headers)
     if history.empty:
         return
 
@@ -535,37 +899,47 @@ def rebuild_forecast(store: SheetStore, history: pd.DataFrame) -> None:
         skin_df = skin_df.sort_values("Timestamp")
         if len(skin_df) < 6:
             continue
-
         try:
             model = ARIMA(skin_df["Price"].values, order=(1, 1, 1))
             fitted = model.fit()
             forecast = fitted.forecast(steps=7)
-            future_dates = pd.date_range(
-                start=skin_df["Timestamp"].iloc[-1] + pd.Timedelta(days=1),
-                periods=7,
-                freq="D",
-            )
+            future_dates = pd.date_range(skin_df["Timestamp"].iloc[-1] + pd.Timedelta(days=1), periods=7, freq="D")
             for forecast_date, predicted_price in zip(future_dates, forecast):
-                forecast_rows.append(
-                    [skin_name, forecast_date.strftime("%Y-%m-%d"), round(float(predicted_price), 2)]
-                )
+                forecast_rows.append([skin_name, forecast_date.strftime("%Y-%m-%d"), round(float(predicted_price), 2)])
         except Exception as exc:
             print(f"Forecast skipped for {skin_name}: {exc}")
 
     if forecast_rows:
-        forecast_sheet.append_rows(forecast_rows, value_input_option="USER_ENTERED")
+        sheet.append_rows(forecast_rows, value_input_option="USER_ENTERED")
+
+
+def get_seed_goods_ids() -> list[str]:
+    raw = os.getenv("BUFF_SEED_GOODS_IDS")
+    if raw:
+        return [item.strip() for item in raw.split(",") if item.strip()]
+    legacy_raw = os.getenv("BUFF_BUTTERFLY_SEEDS")
+    if legacy_raw:
+        return [item.strip() for item in legacy_raw.split(",") if item.strip()]
+    raw = ",".join(DEFAULT_BUTTERFLY_SEEDS + DEFAULT_KARAMBIT_SEEDS)
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def get_track_keywords() -> list[str]:
+    raw = os.getenv("BUFF_TRACK_KEYWORDS", ",".join(DEFAULT_TRACK_KEYWORDS))
+    return [item.strip() for item in raw.split(",") if item.strip()]
 
 
 def run(migrate_only: bool = False) -> None:
     store = SheetStore(SHEET_NAME)
     migrated_rows = migrate_history_sheet(store)
     if migrated_rows:
-        print(f"Migrated {migrated_rows} existing history rows to the new schema.")
+        print(f"Migrated {migrated_rows} history rows to the current schema.")
 
+    history = load_history_frame(store)
     if migrate_only:
-        history = load_history_frame(store)
         agent = PriceAnalysisAgent(history)
-        analysis_rows = [summary for skin in SKINS if (summary := agent.summarize_skin(skin.name))]
+        tracked_names = sorted(history["Skin Name"].dropna().unique().tolist())
+        analysis_rows = [summary for name in tracked_names if (summary := agent.summarize_skin(name))]
         rebuild_dashboard(store, analysis_rows)
         rebuild_signals(store, analysis_rows, datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"))
         rebuild_forecast(store, history)
@@ -574,37 +948,35 @@ def run(migrate_only: bool = False) -> None:
 
     client = BuffPriceClient()
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    min_price = float(os.getenv("BUFF_MIN_PRICE_CNY", "5000"))
+    track_keywords = get_track_keywords()
+    snapshots = client.discover_high_value_catalog(
+        keywords=track_keywords,
+        min_price=min_price,
+        seed_goods_ids=get_seed_goods_ids(),
+    )
 
-    snapshots: list[dict[str, Any]] = []
-    for skin in SKINS:
-        try:
-            snapshot = client.fetch_sell_snapshot(skin)
-            snapshots.append(snapshot)
-            print(
-                f"Fetched {skin.name}: {snapshot['price']} CNY with {snapshot['sell_count']} listings."
-            )
-        except Exception as exc:
-            print(f"Failed to fetch {skin.name}: {exc}")
+    sqlite_path = os.getenv("BUFF_SQLITE_PATH", DEFAULT_SQLITE_PATH).strip()
+    enable_sqlite = os.getenv("BUFF_WRITE_SQLITE", "").strip().lower() in {"1", "true", "yes", "on"}
+    if enable_sqlite and sqlite_path:
+        sqlite_write_snapshots(sqlite_path, snapshots, timestamp)
 
+    rebuild_catalog(store, snapshots)
     append_history(store, snapshots, timestamp)
 
     history = load_history_frame(store)
     agent = PriceAnalysisAgent(history)
-    analysis_rows = [summary for skin in SKINS if (summary := agent.summarize_skin(skin.name))]
+    tracked_names = sorted(set(history["Skin Name"].dropna().unique().tolist()))
+    analysis_rows = [summary for name in tracked_names if (summary := agent.summarize_skin(name))]
 
     rebuild_dashboard(store, analysis_rows)
     rebuild_signals(store, analysis_rows, timestamp)
     rebuild_forecast(store, history)
-
-    print(f"Updated {len(snapshots)} skins, {len(analysis_rows)} analysis rows, and forecast output.")
+    print(f"Collected {len(snapshots)} high-value snapshots for {', '.join(track_keywords)} (>= {min_price:.0f} CNY).")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--migrate-only",
-        action="store_true",
-        help="Convert old Google Sheet history rows to the new schema without fetching live prices.",
-    )
+    parser.add_argument("--migrate-only", action="store_true")
     args = parser.parse_args()
     run(migrate_only=args.migrate_only)
