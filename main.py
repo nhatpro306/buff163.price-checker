@@ -27,6 +27,7 @@ from urllib3.util.retry import Retry
 SHEET_NAME = os.getenv("BUFF_SHEET_NAME", "BuffKnifeTracker")
 LOG_SHEET_NAME = "HistoryLog"
 CATALOG_SHEET_NAME = "Catalog"
+ALL_CATALOG_SHEET_NAME = "AllCatalog"
 DASHBOARD_SHEET_NAME = "Dashboard"
 FORECAST_SHEET_NAME = "Forecast"
 SIGNALS_SHEET_NAME = "Signals"
@@ -59,6 +60,19 @@ CATALOG_HEADERS = [
     "Buy Orders",
     "Reference Price",
     "Image URL",
+]
+ALL_CATALOG_HEADERS = [
+    "Timestamp",
+    "Goods ID",
+    "Family",
+    "Skin Name",
+    "Condition",
+    "Price",
+    "Listings",
+    "Buy Orders",
+    "Reference Price",
+    "Image URL",
+    "Goods URL",
 ]
 
 QUALITY_MAP = {
@@ -295,6 +309,54 @@ class BuffPriceClient:
             if snapshot.price >= min_price and any(keyword in family_lower for keyword in keyword_lower):
                 snapshots[goods_id] = snapshot
             time.sleep(0.35)
+
+        return sorted(
+            snapshots.values(),
+            key=lambda item: (item.family, CONDITION_ORDER.get(item.condition, 50), item.goods_id),
+        )
+
+    def discover_full_catalog(
+        self,
+        *,
+        keywords: list[str],
+        seed_goods_ids: list[str] | None = None,
+        max_pages_per_keyword: int = 60,
+    ) -> list[MarketSnapshot]:
+        queue = [str(goods_id) for goods_id in (seed_goods_ids or []) if str(goods_id).strip()]
+        for keyword in keywords:
+            queue.extend(self.discover_goods_ids_from_market(keyword=keyword, max_pages=max_pages_per_keyword))
+        queue = sorted(set(queue))
+
+        seen: set[str] = set()
+        snapshots: dict[str, MarketSnapshot] = {}
+        keyword_lower = tuple(keyword.lower() for keyword in keywords)
+
+        while queue:
+            goods_id = queue.pop(0)
+            if goods_id in seen:
+                continue
+            seen.add(goods_id)
+
+            try:
+                page_info = self.fetch_goods_page_metadata(goods_id)
+            except Exception as exc:
+                print(f"Failed to parse goods page {goods_id}: {exc}")
+                continue
+
+            for variant_id in page_info.get("variant_goods_ids", []):
+                if variant_id not in seen and variant_id not in queue:
+                    queue.append(variant_id)
+
+            try:
+                snapshot = self.fetch_sell_snapshot(goods_id, page_meta=page_info)
+            except Exception as exc:
+                print(f"Failed to fetch goods {goods_id}: {exc}")
+                continue
+
+            family_lower = snapshot.family.lower()
+            if any(keyword in family_lower for keyword in keyword_lower):
+                snapshots[goods_id] = snapshot
+            time.sleep(0.25)
 
         return sorted(
             snapshots.values(),
@@ -821,6 +883,31 @@ def rebuild_catalog(store: SheetStore, snapshots: list[MarketSnapshot]) -> None:
         )
 
 
+def rebuild_all_catalog(store: SheetStore, snapshots: list[MarketSnapshot], timestamp: str) -> None:
+    sheet = store.worksheet(ALL_CATALOG_SHEET_NAME, ALL_CATALOG_HEADERS, rows=6000, cols=20)
+    sheet.clear()
+    sheet.append_row(ALL_CATALOG_HEADERS)
+    if not snapshots:
+        return
+    rows = [
+        [
+            timestamp,
+            snapshot.goods_id,
+            snapshot.family,
+            snapshot.skin_name,
+            snapshot.condition,
+            snapshot.price,
+            snapshot.listings,
+            snapshot.buy_orders,
+            snapshot.reference_price or "",
+            snapshot.image_url,
+            BuffPriceClient.GOODS_PAGE_URL.format(goods_id=snapshot.goods_id),
+        ]
+        for snapshot in snapshots
+    ]
+    sheet.append_rows(rows, value_input_option="USER_ENTERED")
+
+
 def rebuild_dashboard(store: SheetStore, analysis_rows: list[dict[str, Any]]) -> None:
     headers = [
         "Skin Name",
@@ -1000,6 +1087,16 @@ def run(migrate_only: bool = False) -> None:
         min_price=min_price,
         seed_goods_ids=get_seed_goods_ids(),
     )
+
+    full_catalog_enabled = os.getenv("BUFF_FULL_CATALOG", "").strip().lower() in {"1", "true", "yes", "on"}
+    if full_catalog_enabled:
+        max_pages = int(os.getenv("BUFF_FULL_CATALOG_PAGES", "60"))
+        full_snapshots = client.discover_full_catalog(
+            keywords=track_keywords,
+            seed_goods_ids=get_seed_goods_ids(),
+            max_pages_per_keyword=max_pages,
+        )
+        rebuild_all_catalog(store, full_snapshots, timestamp)
 
     sqlite_path = os.getenv("BUFF_SQLITE_PATH", DEFAULT_SQLITE_PATH).strip()
     enable_sqlite = os.getenv("BUFF_WRITE_SQLITE", "").strip().lower() in {"1", "true", "yes", "on"}

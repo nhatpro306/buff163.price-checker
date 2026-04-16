@@ -10,6 +10,8 @@ from gspread import WorksheetNotFound
 from streamlit_autorefresh import st_autorefresh
 
 from main import (
+    ALL_CATALOG_HEADERS,
+    ALL_CATALOG_SHEET_NAME,
     CATALOG_HEADERS,
     CATALOG_SHEET_NAME,
     CONDITION_ORDER,
@@ -282,6 +284,7 @@ if use_sqlite and sqlite_path and Path(sqlite_path).exists():
 else:
     history_df = load_history_frame(get_store())
 catalog_df = load_sheet_records(CATALOG_SHEET_NAME)
+all_catalog_df = load_sheet_records(ALL_CATALOG_SHEET_NAME)
 forecast_df = load_sheet_records(FORECAST_SHEET_NAME)
 
 if history_df.empty:
@@ -513,7 +516,7 @@ with right:
     )
     st.dataframe(summary, use_container_width=True, hide_index=True)
 
-tab1, tab2, tab3 = st.tabs(["Sell History", "Condition Catalog", "Forecast"])
+tab1, tab2, tab3, tab4 = st.tabs(["Sell History", "Condition Catalog", "Forecast", "Full Catalog"])
 
 with tab1:
     sell_view = variant_df[
@@ -606,3 +609,15 @@ with tab3:
                     .properties(height=320)
                 )
                 st.altair_chart(forecast_chart, use_container_width=True)
+
+with tab4:
+    if all_catalog_df.empty:
+        st.info("Full catalog sheet is empty. Set `BUFF_FULL_CATALOG=1` and run `python main.py` to populate it.")
+    else:
+        for col in ("Price", "Listings", "Buy Orders", "Reference Price"):
+            if col in all_catalog_df.columns:
+                all_catalog_df[col] = pd.to_numeric(all_catalog_df[col], errors="coerce")
+        all_catalog_df["Family"] = all_catalog_df.get("Family", "").fillna("").astype(str)
+        scoped = all_catalog_df[all_catalog_df["Family"] == family_selected].copy() if family_selected else all_catalog_df.copy()
+        cols = [c for c in ("Timestamp", "Skin Name", "Condition", "Price", "Listings", "Buy Orders", "Reference Price", "Goods ID", "Goods URL", "Image URL") if c in scoped.columns]
+        st.dataframe(scoped[cols].sort_values(["Price"], ascending=False, na_position="last"), use_container_width=True, hide_index=True)
