@@ -440,11 +440,11 @@ price_chart = (
 )
 stock_chart = (
     alt.Chart(daily_df)
-    .mark_bar(color="#5f7bd0", opacity=0.72)
+    .mark_line(color="#5f7bd0", point=True, strokeWidth=2.5)
     .encode(
         x=alt.X("Day:T", title="Day"),
         y=alt.Y("Listings:Q", title="Sell Stock"),
-        tooltip=["Day:T", "Listings:Q", "BuyOrders:Q"],
+        tooltip=["Day:T", "Price:Q", "Listings:Q", "BuyOrders:Q"],
     )
     .properties(height=180)
 )
@@ -452,7 +452,7 @@ stock_chart = (
 combined_chart = alt.layer(
     price_chart,
     alt.Chart(daily_df)
-    .mark_bar(color="#5f7bd0", opacity=0.24)
+    .mark_line(color="#5f7bd0", point=True, strokeWidth=2.5, opacity=0.85)
     .encode(
         x=alt.X("Day:T", title="Day"),
         y=alt.Y(
@@ -572,7 +572,7 @@ with tab3:
                 )
                 listings_forecast = (
                     alt.Chart(forecast_view)
-                    .mark_bar(color="#5f7bd0", opacity=0.22)
+                    .mark_line(color="#5f7bd0", point=True, strokeWidth=2.5, opacity=0.85)
                     .encode(
                         x=alt.X("Forecast Date:T", title="Date"),
                         y=alt.Y(
