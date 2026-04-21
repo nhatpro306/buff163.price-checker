@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 import altair as alt
 import pandas as pd
@@ -20,6 +19,12 @@ from main import (
     SheetStore,
     load_history_frame,
     sqlite_load_history_frame,
+)
+from app_data_utils import (
+    choose_image_url,
+    filter_high_value_families,
+    load_app_frames,
+    prepare_history_frame,
 )
 
 
@@ -279,24 +284,16 @@ inject_styles()
 
 sqlite_path = os.getenv("BUFF_SQLITE_PATH", "").strip()
 use_sqlite = os.getenv("BUFF_READ_SQLITE", "").strip().lower() in {"1", "true", "yes", "on"}
-startup_error: Exception | None = None
-try:
-    if use_sqlite and sqlite_path and Path(sqlite_path).exists():
-        history_df = sqlite_load_history_frame(sqlite_path)
-        catalog_df = pd.DataFrame()
-        all_catalog_df = pd.DataFrame()
-        forecast_df = pd.DataFrame()
-    else:
-        history_df = load_history_frame(get_store())
-        catalog_df = load_sheet_records(CATALOG_SHEET_NAME)
-        all_catalog_df = load_sheet_records(ALL_CATALOG_SHEET_NAME)
-        forecast_df = load_sheet_records(FORECAST_SHEET_NAME)
-except Exception as exc:
-    startup_error = exc
-    history_df = pd.DataFrame()
-    catalog_df = pd.DataFrame()
-    all_catalog_df = pd.DataFrame()
-    forecast_df = pd.DataFrame()
+history_df, catalog_df, all_catalog_df, forecast_df, startup_error = load_app_frames(
+    use_sqlite=use_sqlite,
+    sqlite_path=sqlite_path,
+    load_sqlite_history=sqlite_load_history_frame,
+    load_sheet_history=lambda: load_history_frame(get_store()),
+    load_sheet_records=load_sheet_records,
+    catalog_sheet_name=CATALOG_SHEET_NAME,
+    all_catalog_sheet_name=ALL_CATALOG_SHEET_NAME,
+    forecast_sheet_name=FORECAST_SHEET_NAME,
+)
 
 if startup_error is not None:
     st.error("Cannot load data source. Check Google Sheet credentials or enable SQLite mode.")
@@ -317,26 +314,8 @@ if not required_cols.issubset(set(history_df.columns)):
     st.stop()
     raise SystemExit(0)
 
-history_df["Timestamp"] = pd.to_datetime(history_df["Timestamp"], errors="coerce", utc=True)
-history_df["Price"] = pd.to_numeric(history_df["Price"], errors="coerce")
-history_df["Listings"] = pd.to_numeric(history_df["Listings"], errors="coerce")
-history_df["Buy Orders"] = pd.to_numeric(history_df.get("Buy Orders"), errors="coerce")
-history_df["Reference Price"] = pd.to_numeric(history_df.get("Reference Price"), errors="coerce")
-history_df["Family"] = history_df["Family"].fillna("").astype(str)
-history_df["Skin Name"] = history_df["Skin Name"].fillna("").astype(str)
-history_df["Condition"] = history_df["Condition"].fillna("Unknown").astype(str)
-history_df["Image URL"] = history_df.get("Image URL", "").fillna("").astype(str)
-history_df = history_df.dropna(subset=["Timestamp", "Family", "Skin Name", "Price"]).sort_values("Timestamp")
-
-family_mask = history_df["Family"].str.contains("|".join(TRACK_KEYWORDS), case=False, na=False)
-history_df = history_df[family_mask].copy()
-latest_family_prices = (
-    history_df.sort_values("Timestamp")
-    .groupby("Family", as_index=False)
-    .tail(1)[["Family", "Price"]]
-)
-high_value_families = latest_family_prices[latest_family_prices["Price"] >= HIGH_VALUE_MIN_PRICE]["Family"].tolist()
-history_df = history_df[history_df["Family"].isin(high_value_families)].copy()
+history_df = prepare_history_frame(history_df)
+history_df = filter_high_value_families(history_df, TRACK_KEYWORDS, HIGH_VALUE_MIN_PRICE)
 
 if history_df.empty:
     st.warning(f"No Butterfly/Karambit families above {HIGH_VALUE_MIN_PRICE:,.0f} CNY yet. Run `python main.py` to refresh.")
@@ -389,25 +368,7 @@ condition_selected = condition_map[selected_condition_label]
 
 variant_df = family_df[family_df["Condition"] == condition_selected].copy().sort_values("Timestamp")
 latest = variant_df.iloc[-1]
-
-
-def choose_image_url() -> str:
-    for frame in (variant_df, family_df, history_df):
-        candidates = frame.get("Image URL")
-        if candidates is None:
-            continue
-        non_empty = (
-            candidates.astype(str)
-            .str.strip()
-            .replace({"": pd.NA, "nan": pd.NA, "None": pd.NA})
-            .dropna()
-        )
-        if not non_empty.empty:
-            return str(non_empty.iloc[-1])
-    return ""
-
-
-image_url = choose_image_url()
+image_url = choose_image_url(variant_df, family_df, history_df)
 reference_price = float(latest["Reference Price"]) if pd.notna(latest["Reference Price"]) else float(latest["Price"])
 buy_orders = int(latest["Buy Orders"]) if pd.notna(latest["Buy Orders"]) else 0
 sell_stock = int(latest["Listings"]) if pd.notna(latest["Listings"]) else 0
