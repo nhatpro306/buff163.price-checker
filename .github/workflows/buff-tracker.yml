@@ -16,10 +16,12 @@ jobs:
       BUFF_COOKIE: ${{ secrets.BUFF_COOKIE }}
       BUFF_SHEET_NAME: BuffKnifeTracker
       BUFF_MIN_PRICE_CNY: "5000"
-      BUFF_HIGH_VALUE_PAGES: "25"
+      BUFF_HIGH_VALUE_PAGES: "12"
       BUFF_TRACK_KEYWORDS: "Butterfly Knife,Karambit"
       BUFF_FULL_CATALOG: "0"
-      BUFF_FULL_CATALOG_PAGES: "25"
+      BUFF_FULL_CATALOG_PAGES: "12"
+      BUFF_RUN_MIGRATION: "0"
+      BUFF_ENABLE_FORECAST: "0"
 
     steps:
       - name: Checkout code

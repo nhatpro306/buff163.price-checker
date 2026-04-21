@@ -698,6 +698,13 @@ def try_float(value: Any) -> float | None:
         return None
 
 
+def env_flag(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def split_market_name(name: str) -> tuple[str, str]:
     cleaned = name.replace("★ ", "").strip()
     match = re.match(r"(.+?) \((.+)\)$", cleaned)
@@ -1067,9 +1074,13 @@ def get_track_keywords() -> list[str]:
 
 def run(migrate_only: bool = False) -> None:
     store = SheetStore(SHEET_NAME)
-    migrated_rows = migrate_history_sheet(store)
-    if migrated_rows:
-        print(f"Migrated {migrated_rows} history rows to the current schema.")
+    run_migration = migrate_only or env_flag("BUFF_RUN_MIGRATION", False)
+    if run_migration:
+        migrated_rows = migrate_history_sheet(store)
+        if migrated_rows:
+            print(f"Migrated {migrated_rows} history rows to the current schema.")
+    else:
+        print("Skipping migration for this run (BUFF_RUN_MIGRATION is disabled).")
 
     history = load_history_frame(store)
     if migrate_only:
@@ -1078,7 +1089,8 @@ def run(migrate_only: bool = False) -> None:
         analysis_rows = [summary for name in tracked_names if (summary := agent.summarize_skin(name))]
         rebuild_dashboard(store, analysis_rows)
         rebuild_signals(store, analysis_rows, datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"))
-        rebuild_forecast(store, history)
+        if env_flag("BUFF_ENABLE_FORECAST", True):
+            rebuild_forecast(store, history)
         print("Migration-only run completed.")
         return
 
@@ -1122,7 +1134,8 @@ def run(migrate_only: bool = False) -> None:
 
     rebuild_dashboard(store, analysis_rows)
     rebuild_signals(store, analysis_rows, timestamp)
-    rebuild_forecast(store, history)
+    if env_flag("BUFF_ENABLE_FORECAST", False):
+        rebuild_forecast(store, history)
     print(
         f"Collected {len(snapshots)} high-value snapshots for {', '.join(track_keywords)} "
         f"(>= {min_price:.0f} CNY, pages={high_value_pages})."
