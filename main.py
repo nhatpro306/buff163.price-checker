@@ -1086,9 +1086,9 @@ def run(migrate_only: bool = False) -> None:
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     min_price = float(os.getenv("BUFF_MIN_PRICE_CNY", "5000"))
     try:
-        high_value_pages = max(1, int(os.getenv("BUFF_HIGH_VALUE_PAGES", "60")))
+        high_value_pages = max(1, int(os.getenv("BUFF_HIGH_VALUE_PAGES", "25")))
     except ValueError:
-        high_value_pages = 60
+        high_value_pages = 25
     track_keywords = get_track_keywords()
     snapshots = client.discover_high_value_catalog(
         keywords=track_keywords,

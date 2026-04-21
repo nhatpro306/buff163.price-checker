@@ -24,8 +24,9 @@ def load_app_frames(
 
         history_df = load_sheet_history()
         catalog_df = load_sheet_records(catalog_sheet_name)
-        all_catalog_df = load_sheet_records(all_catalog_sheet_name)
-        forecast_df = load_sheet_records(forecast_sheet_name)
+        # Heavy sheets are loaded lazily in UI tabs to keep startup responsive.
+        all_catalog_df = pd.DataFrame()
+        forecast_df = pd.DataFrame()
         return history_df, catalog_df, all_catalog_df, forecast_df, None
     except Exception as exc:
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), exc

@@ -28,7 +28,8 @@ from app_data_utils import (
 )
 
 
-st_autorefresh(interval=60 * 1000, key="buff_refresh")
+REFRESH_SECONDS = int(os.getenv("BUFF_UI_REFRESH_SEC", "300"))
+st_autorefresh(interval=max(30, REFRESH_SECONDS) * 1000, key="buff_refresh")
 st.set_page_config(page_title="BUFF163 High-Value Knife Market", layout="wide")
 
 TRACK_KEYWORDS = ("Butterfly Knife", "Karambit")
@@ -539,6 +540,8 @@ with tab2:
 
 with tab3:
     if forecast_df.empty:
+        forecast_df = load_sheet_records(FORECAST_SHEET_NAME)
+    if forecast_df.empty:
         st.info("Forecast sheet is empty.")
     else:
         forecast_df["Forecast Date"] = pd.to_datetime(forecast_df["Forecast Date"], errors="coerce")
@@ -599,8 +602,20 @@ with tab3:
                 st.altair_chart(forecast_chart, use_container_width=True)
 
 with tab4:
+    if "load_full_catalog" not in st.session_state:
+        st.session_state["load_full_catalog"] = False
+    col_load, col_hint = st.columns((1, 3))
+    with col_load:
+        if st.button("Load Full Catalog"):
+            st.session_state["load_full_catalog"] = True
+    with col_hint:
+        st.caption("This sheet can be large; loading on demand keeps the app fast.")
+
+    if st.session_state["load_full_catalog"] and all_catalog_df.empty:
+        all_catalog_df = load_sheet_records(ALL_CATALOG_SHEET_NAME)
+
     if all_catalog_df.empty:
-        st.info("Full catalog sheet is empty. Set `BUFF_FULL_CATALOG=1` and run `python main.py` to populate it.")
+        st.info("Full catalog not loaded yet. Click 'Load Full Catalog'.")
     else:
         for col in ("Price", "Listings", "Buy Orders", "Reference Price"):
             if col in all_catalog_df.columns:
