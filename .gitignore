@@ -172,3 +172,6 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Local nested duplicate repository copy (not part of deployable root app)
+buff163.price-checker/
