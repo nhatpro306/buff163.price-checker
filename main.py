@@ -457,6 +457,17 @@ def sqlite_init(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_snapshots_ts ON snapshots(ts);
         """
     )
+    goods_cols = {row[1] for row in conn.execute("PRAGMA table_info(goods);")}
+    if "reference_price" not in goods_cols:
+        conn.execute("ALTER TABLE goods ADD COLUMN reference_price REAL;")
+    if "image_url" not in goods_cols:
+        conn.execute("ALTER TABLE goods ADD COLUMN image_url TEXT;")
+
+    snapshots_cols = {row[1] for row in conn.execute("PRAGMA table_info(snapshots);")}
+    if "buy_orders" not in snapshots_cols:
+        conn.execute("ALTER TABLE snapshots ADD COLUMN buy_orders INTEGER NOT NULL DEFAULT 0;")
+    if "observed_orders" not in snapshots_cols:
+        conn.execute("ALTER TABLE snapshots ADD COLUMN observed_orders INTEGER NOT NULL DEFAULT 0;")
 
 
 def sqlite_upsert_snapshot(
@@ -526,6 +537,7 @@ def sqlite_load_history_frame(db_path: str) -> pd.DataFrame:
         return pd.DataFrame(columns=HISTORY_HEADERS)
     conn = sqlite_connect(db_path)
     try:
+        sqlite_init(conn)
         query = """
         SELECT
             s.ts AS "Timestamp",
@@ -642,8 +654,11 @@ def resolve_credentials_path() -> Path:
 
     candidates = [
         Path("credentials.json"),
+        Path("credentials.json.bak"),
         Path(__file__).resolve().parent / "credentials.json",
+        Path(__file__).resolve().parent / "credentials.json.bak",
         Path(__file__).resolve().parent.parent / "credentials.json",
+        Path(__file__).resolve().parent.parent / "credentials.json.bak",
     ]
     for candidate in candidates:
         if candidate.exists():

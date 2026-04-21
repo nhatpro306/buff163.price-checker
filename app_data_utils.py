@@ -18,7 +18,7 @@ def load_app_frames(
     forecast_sheet_name: str,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, Exception | None]:
     try:
-        if use_sqlite and sqlite_path and Path(sqlite_path).exists():
+        if use_sqlite and sqlite_path:
             history_df = load_sqlite_history(sqlite_path)
             return history_df, pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), None
 
