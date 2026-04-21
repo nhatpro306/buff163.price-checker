@@ -1081,11 +1081,16 @@ def run(migrate_only: bool = False) -> None:
     client = BuffPriceClient()
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     min_price = float(os.getenv("BUFF_MIN_PRICE_CNY", "5000"))
+    try:
+        high_value_pages = max(1, int(os.getenv("BUFF_HIGH_VALUE_PAGES", "60")))
+    except ValueError:
+        high_value_pages = 60
     track_keywords = get_track_keywords()
     snapshots = client.discover_high_value_catalog(
         keywords=track_keywords,
         min_price=min_price,
         seed_goods_ids=get_seed_goods_ids(),
+        max_pages_per_keyword=high_value_pages,
     )
 
     full_catalog_enabled = os.getenv("BUFF_FULL_CATALOG", "").strip().lower() in {"1", "true", "yes", "on"}
@@ -1114,7 +1119,10 @@ def run(migrate_only: bool = False) -> None:
     rebuild_dashboard(store, analysis_rows)
     rebuild_signals(store, analysis_rows, timestamp)
     rebuild_forecast(store, history)
-    print(f"Collected {len(snapshots)} high-value snapshots for {', '.join(track_keywords)} (>= {min_price:.0f} CNY).")
+    print(
+        f"Collected {len(snapshots)} high-value snapshots for {', '.join(track_keywords)} "
+        f"(>= {min_price:.0f} CNY, pages={high_value_pages})."
+    )
 
 
 if __name__ == "__main__":

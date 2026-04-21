@@ -279,17 +279,43 @@ inject_styles()
 
 sqlite_path = os.getenv("BUFF_SQLITE_PATH", "").strip()
 use_sqlite = os.getenv("BUFF_READ_SQLITE", "").strip().lower() in {"1", "true", "yes", "on"}
-if use_sqlite and sqlite_path and Path(sqlite_path).exists():
-    history_df = sqlite_load_history_frame(sqlite_path)
-else:
-    history_df = load_history_frame(get_store())
-catalog_df = load_sheet_records(CATALOG_SHEET_NAME)
-all_catalog_df = load_sheet_records(ALL_CATALOG_SHEET_NAME)
-forecast_df = load_sheet_records(FORECAST_SHEET_NAME)
+startup_error: Exception | None = None
+try:
+    if use_sqlite and sqlite_path and Path(sqlite_path).exists():
+        history_df = sqlite_load_history_frame(sqlite_path)
+        catalog_df = pd.DataFrame()
+        all_catalog_df = pd.DataFrame()
+        forecast_df = pd.DataFrame()
+    else:
+        history_df = load_history_frame(get_store())
+        catalog_df = load_sheet_records(CATALOG_SHEET_NAME)
+        all_catalog_df = load_sheet_records(ALL_CATALOG_SHEET_NAME)
+        forecast_df = load_sheet_records(FORECAST_SHEET_NAME)
+except Exception as exc:
+    startup_error = exc
+    history_df = pd.DataFrame()
+    catalog_df = pd.DataFrame()
+    all_catalog_df = pd.DataFrame()
+    forecast_df = pd.DataFrame()
+
+if startup_error is not None:
+    st.error("Cannot load data source. Check Google Sheet credentials or enable SQLite mode.")
+    st.code(str(startup_error))
+    st.info("Set `GSHEET_CREDS_JSON`/`credentials.json`, or set `BUFF_READ_SQLITE=1` with `BUFF_SQLITE_PATH`.")
+    st.stop()
+    raise SystemExit(0)
 
 if history_df.empty:
     st.warning("No knife history exists yet. Run `python main.py` first.")
     st.stop()
+    raise SystemExit(0)
+
+required_cols = {"Timestamp", "Price", "Listings", "Family", "Skin Name", "Condition"}
+if not required_cols.issubset(set(history_df.columns)):
+    st.error("History data is missing required columns. Run `python main.py --migrate-only` once.")
+    st.code(f"Missing columns: {sorted(required_cols - set(history_df.columns))}")
+    st.stop()
+    raise SystemExit(0)
 
 history_df["Timestamp"] = pd.to_datetime(history_df["Timestamp"], errors="coerce", utc=True)
 history_df["Price"] = pd.to_numeric(history_df["Price"], errors="coerce")
@@ -313,8 +339,9 @@ high_value_families = latest_family_prices[latest_family_prices["Price"] >= HIGH
 history_df = history_df[history_df["Family"].isin(high_value_families)].copy()
 
 if history_df.empty:
-    st.warning(f"No Butterfly/Karambit families above ¥{HIGH_VALUE_MIN_PRICE:,.0f} yet. Run `python main.py` to refresh.")
+    st.warning(f"No Butterfly/Karambit families above {HIGH_VALUE_MIN_PRICE:,.0f} CNY yet. Run `python main.py` to refresh.")
     st.stop()
+    raise SystemExit(0)
 
 st.markdown(
     """
@@ -323,7 +350,7 @@ st.markdown(
         <div class="buff-badge">B</div>
         <div>BUFF163 High-Value Knife Market</div>
       </div>
-      <div style="color:#aab6ca;">Butterfly + Karambit tracker (¥5,000+) with condition tabs, sell count, buy depth, and daily history.</div>
+      <div style="color:#aab6ca;">Butterfly + Karambit tracker (5,000+ CNY) with condition tabs, sell count, buy depth, and daily history.</div>
     </div>
     """,
     unsafe_allow_html=True,
@@ -349,7 +376,7 @@ condition_latest = (
     .assign(_sort_key=lambda frame: frame["Condition"].map(lambda value: CONDITION_ORDER.get(str(value), 50)))
     .sort_values(["_sort_key", "Condition"])
 )
-condition_labels = [f"{row['Condition'] or 'Unknown'}  ¥ {float(row['Price']):,.2f}" for _, row in condition_latest.iterrows()]
+condition_labels = [f"{row['Condition'] or 'Unknown'}  {float(row['Price']):,.2f} CNY" for _, row in condition_latest.iterrows()]
 condition_map = dict(zip(condition_labels, condition_latest["Condition"].tolist()))
 
 selected_condition_label = st.radio(
@@ -402,7 +429,7 @@ st.markdown(
             <span>Goods ID | {str(latest.get('Goods ID') or 'N/A')}</span>
           </div>
           <div class="buff-statline">
-            <div class="buff-ref">Reference price <strong>¥ {reference_price:,.2f}</strong></div>
+            <div class="buff-ref">Reference price <strong>{reference_price:,.2f} CNY</strong></div>
             <div class="buff-ref">Sell stock <strong style="font-size:1.3rem;">{sell_stock}</strong></div>
             <div class="buff-ref">Buy orders <strong style="font-size:1.3rem;">{buy_orders}</strong></div>
           </div>
@@ -414,7 +441,7 @@ st.markdown(
 )
 
 metric_cols = st.columns(4)
-metric_cols[0].metric("Lowest Sell", f"¥ {float(latest['Price']):,.2f}")
+metric_cols[0].metric("Lowest Sell", f"{float(latest['Price']):,.2f} CNY")
 metric_cols[1].metric("Sell", sell_stock)
 metric_cols[2].metric("Buy Orders", buy_orders)
 metric_cols[3].metric("Last Update", latest["Timestamp"].strftime("%Y-%m-%d"))
