@@ -661,19 +661,23 @@ def credentials_from_info(info: dict[str, Any], scope: list[str]) -> service_acc
 
 
 def load_google_credentials(scope: list[str]) -> service_account.Credentials:
-    raw_json = os.getenv("GSHEET_CREDS_JSON")
-    if raw_json:
-        return credentials_from_info(json.loads(raw_json), scope)
-
-    raw_json = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
-    if raw_json:
-        return credentials_from_info(json.loads(raw_json), scope)
+    env_json_keys = [
+        "GSHEET_CREDS_JSON",
+        "GSHEET_CREDS",
+        "GOOGLE_APPLICATION_CREDENTIALS_JSON",
+        "GOOGLE_CREDENTIALS_JSON",
+    ]
+    for key in env_json_keys:
+        raw_json = os.getenv(key)
+        if raw_json:
+            return credentials_from_info(json.loads(raw_json), scope)
 
     try:
         import streamlit as st
 
-        if "GSHEET_CREDS_JSON" in st.secrets:
-            return credentials_from_info(json.loads(st.secrets["GSHEET_CREDS_JSON"]), scope)
+        for key in ("GSHEET_CREDS_JSON", "GSHEET_CREDS", "GOOGLE_CREDENTIALS_JSON"):
+            if key in st.secrets:
+                return credentials_from_info(json.loads(str(st.secrets[key])), scope)
         if "gcp_service_account" in st.secrets:
             return credentials_from_info(dict(st.secrets["gcp_service_account"]), scope)
     except Exception:

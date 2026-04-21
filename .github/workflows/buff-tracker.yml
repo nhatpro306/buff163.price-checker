@@ -11,6 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GSHEET_CREDS_JSON: ${{ secrets.GSHEET_CREDS_JSON }}
+      GSHEET_CREDS: ${{ secrets.GSHEET_CREDS }}
       GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.GSHEET_CREDS_JSON }}
       BUFF_COOKIE: ${{ secrets.BUFF_COOKIE }}
       BUFF_SHEET_NAME: BuffKnifeTracker
