@@ -994,8 +994,12 @@ def rebuild_signals(store: SheetStore, analysis_rows: list[dict[str, Any]], time
 
 
 def rebuild_forecast(store: SheetStore, history: pd.DataFrame) -> None:
-    from statsmodels.tsa.arima.model import ARIMA
-    from statsmodels.tsa.statespace.sarimax import SARIMAX
+    try:
+        from statsmodels.tsa.arima.model import ARIMA
+        from statsmodels.tsa.statespace.sarimax import SARIMAX
+    except Exception:
+        print("Forecast skipped: statsmodels is not installed.")
+        return
 
     headers = ["Skin Name", "Forecast Date", "Predicted Price", "Predicted Listings", "Model"]
     sheet = store.worksheet(FORECAST_SHEET_NAME, headers, rows=800, cols=10)
