@@ -28,7 +28,8 @@ from app_data_utils import (
 )
 
 
-REFRESH_SECONDS = int(os.getenv("BUFF_UI_REFRESH_SEC", "300"))
+REFRESH_SECONDS = int(os.getenv("BUFF_UI_REFRESH_SEC", "900"))
+CACHE_TTL_SECONDS = int(os.getenv("BUFF_UI_CACHE_TTL_SEC", "300"))
 st_autorefresh(interval=max(30, REFRESH_SECONDS) * 1000, key="buff_refresh")
 st.set_page_config(page_title="BUFF163 High-Value Knife Market", layout="wide")
 
@@ -41,7 +42,7 @@ def get_store() -> SheetStore:
     return SheetStore(os.getenv("BUFF_SHEET_NAME", SHEET_NAME))
 
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
 def load_sheet_records(sheet_name: str) -> pd.DataFrame:
     try:
         worksheet = get_store().spreadsheet.worksheet(sheet_name)
@@ -49,6 +50,11 @@ def load_sheet_records(sheet_name: str) -> pd.DataFrame:
         return pd.DataFrame(records) if records else pd.DataFrame()
     except WorksheetNotFound:
         return pd.DataFrame(columns=CATALOG_HEADERS if sheet_name == CATALOG_SHEET_NAME else [])
+
+
+@st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
+def load_history_records() -> pd.DataFrame:
+    return load_history_frame(get_store())
 
 
 def inject_styles() -> None:
@@ -289,7 +295,7 @@ history_df, catalog_df, all_catalog_df, forecast_df, startup_error = load_app_fr
     use_sqlite=use_sqlite,
     sqlite_path=sqlite_path,
     load_sqlite_history=sqlite_load_history_frame,
-    load_sheet_history=lambda: load_history_frame(get_store()),
+    load_sheet_history=load_history_records,
     load_sheet_records=load_sheet_records,
     catalog_sheet_name=CATALOG_SHEET_NAME,
     all_catalog_sheet_name=ALL_CATALOG_SHEET_NAME,
@@ -478,9 +484,9 @@ with left:
         label_visibility="collapsed",
     )
     if chart_mode.startswith("Combined"):
-        st.altair_chart(combined_chart, use_container_width=True)
+        st.altair_chart(combined_chart, width="stretch")
     else:
-        st.altair_chart((price_chart & stock_chart).resolve_scale(x="shared"), use_container_width=True)
+        st.altair_chart((price_chart & stock_chart).resolve_scale(x="shared"), width="stretch")
 
 with right:
     summary = (
@@ -503,7 +509,7 @@ with right:
         """,
         unsafe_allow_html=True,
     )
-    st.dataframe(summary, use_container_width=True, hide_index=True)
+    st.dataframe(summary, width="stretch", hide_index=True)
 
 tab1, tab2, tab3, tab4 = st.tabs(["Sell History", "Condition Catalog", "Forecast", "Full Catalog"])
 
@@ -514,9 +520,11 @@ with tab1:
     sell_view["Listings"] = sell_view["Listings"].fillna(0).astype(int)
     sell_view["Buy Orders"] = sell_view["Buy Orders"].fillna(0).astype(int)
     sell_view["Observed Orders"] = pd.to_numeric(sell_view["Observed Orders"], errors="coerce").fillna(0).astype(int)
-    st.dataframe(sell_view, use_container_width=True, hide_index=True)
+    st.dataframe(sell_view, width="stretch", hide_index=True)
 
 with tab2:
+    if catalog_df.empty:
+        catalog_df = load_sheet_records(CATALOG_SHEET_NAME)
     if catalog_df.empty:
         st.info("Catalog sheet is empty.")
     else:
@@ -534,7 +542,7 @@ with tab2:
         family_catalog["Buy Orders"] = family_catalog["Buy Orders"].fillna(0).astype(int)
         st.dataframe(
             family_catalog[["Skin Name", "Condition", "Price", "Listings", "Buy Orders", "Goods ID"]],
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
 
@@ -580,12 +588,12 @@ with tab3:
                 )
                 st.altair_chart(
                     alt.layer(price_forecast, listings_forecast).resolve_scale(y="independent"),
-                    use_container_width=True,
+                    width="stretch",
                 )
                 show_cols = [col for col in ("Forecast Date", "Predicted Price", "Predicted Listings", "Model") if col in forecast_view.columns]
                 st.dataframe(
                     forecast_view[show_cols].sort_values("Forecast Date"),
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                 )
             else:
@@ -599,7 +607,7 @@ with tab3:
                     )
                     .properties(height=320)
                 )
-                st.altair_chart(forecast_chart, use_container_width=True)
+                st.altair_chart(forecast_chart, width="stretch")
 
 with tab4:
     if "load_full_catalog" not in st.session_state:
@@ -623,4 +631,4 @@ with tab4:
         all_catalog_df["Family"] = all_catalog_df.get("Family", "").fillna("").astype(str)
         scoped = all_catalog_df[all_catalog_df["Family"] == family_selected].copy() if family_selected else all_catalog_df.copy()
         cols = [c for c in ("Timestamp", "Skin Name", "Condition", "Price", "Listings", "Buy Orders", "Reference Price", "Goods ID", "Goods URL", "Image URL") if c in scoped.columns]
-        st.dataframe(scoped[cols].sort_values(["Price"], ascending=False, na_position="last"), use_container_width=True, hide_index=True)
+        st.dataframe(scoped[cols].sort_values(["Price"], ascending=False, na_position="last"), width="stretch", hide_index=True)

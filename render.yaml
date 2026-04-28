@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: buff163-price-checker
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run app.py --server.address 0.0.0.0 --server.port $PORT

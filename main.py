@@ -19,8 +19,6 @@ import pandas as pd
 import requests
 from google.oauth2 import service_account
 from requests.adapters import HTTPAdapter
-from statsmodels.tsa.arima.model import ARIMA
-from statsmodels.tsa.statespace.sarimax import SARIMAX
 from urllib3.util.retry import Retry
 
 
@@ -996,6 +994,9 @@ def rebuild_signals(store: SheetStore, analysis_rows: list[dict[str, Any]], time
 
 
 def rebuild_forecast(store: SheetStore, history: pd.DataFrame) -> None:
+    from statsmodels.tsa.arima.model import ARIMA
+    from statsmodels.tsa.statespace.sarimax import SARIMAX
+
     headers = ["Skin Name", "Forecast Date", "Predicted Price", "Predicted Listings", "Model"]
     sheet = store.worksheet(FORECAST_SHEET_NAME, headers, rows=800, cols=10)
     sheet.clear()

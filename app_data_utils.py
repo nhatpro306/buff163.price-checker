@@ -23,8 +23,8 @@ def load_app_frames(
             return history_df, pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), None
 
         history_df = load_sheet_history()
-        catalog_df = load_sheet_records(catalog_sheet_name)
         # Heavy sheets are loaded lazily in UI tabs to keep startup responsive.
+        catalog_df = pd.DataFrame()
         all_catalog_df = pd.DataFrame()
         forecast_df = pd.DataFrame()
         return history_df, catalog_df, all_catalog_df, forecast_df, None
