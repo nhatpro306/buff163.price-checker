@@ -405,7 +405,13 @@ class SheetStore:
         ]
         creds = load_google_credentials(scope)
         self.client = gspread.authorize(creds)
-        self.spreadsheet = self.client.open(sheet_name)
+        if sheet_name.startswith("https://docs.google.com/spreadsheets/"):
+            self.spreadsheet = self.client.open_by_url(sheet_name)
+        else:
+            try:
+                self.spreadsheet = self.client.open(sheet_name)
+            except gspread.SpreadsheetNotFound:
+                self.spreadsheet = self.client.create(sheet_name)
 
     def worksheet(self, title: str, headers: list[str], rows: int = 2000, cols: int = 20):
         try:
