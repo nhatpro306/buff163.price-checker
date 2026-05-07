@@ -15,13 +15,14 @@ jobs:
       GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.GSHEET_CREDS_JSON }}
       BUFF_COOKIE: ${{ secrets.BUFF_COOKIE }}
       BUFF_SHEET_NAME: BuffKnifeTracker
-      BUFF_MIN_PRICE_CNY: "5000"
-      BUFF_HIGH_VALUE_PAGES: "12"
-      BUFF_TRACK_KEYWORDS: "Butterfly Knife,Karambit"
+      BUFF_MIN_PRICE_CNY: "0"
+      BUFF_HIGH_VALUE_PAGES: "2"
+      BUFF_TRACK_KEYWORDS: "Bayonet,Bowie Knife,Butterfly Knife,Classic Knife,Falchion Knife,Flip Knife,Gut Knife,Huntsman Knife,Karambit,Kukri Knife,M9 Bayonet,Navaja Knife,Nomad Knife,Paracord Knife,Shadow Daggers,Skeleton Knife,Stiletto Knife,Survival Knife,Talon Knife,Ursus Knife"
       BUFF_FULL_CATALOG: "0"
       BUFF_FULL_CATALOG_PAGES: "12"
       BUFF_RUN_MIGRATION: "0"
       BUFF_ENABLE_FORECAST: "0"
+      BUFF_LISTINGS_ONLY_DIRECT: "1"
 
     steps:
       - name: Checkout code

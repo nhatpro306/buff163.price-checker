@@ -60,8 +60,8 @@ def filter_high_value_families(history_df: pd.DataFrame, keywords: tuple[str, ..
     return frame[frame["Family"].isin(high_value_families)].copy()
 
 
-def choose_image_url(variant_df: pd.DataFrame, family_df: pd.DataFrame, history_df: pd.DataFrame) -> str:
-    for frame in (variant_df, family_df, history_df):
+def choose_image_url(variant_df: pd.DataFrame) -> str:
+    for frame in (variant_df,):
         candidates = frame.get("Image URL")
         if candidates is None:
             continue

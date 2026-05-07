@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import html
 import json
 import math
@@ -31,8 +32,75 @@ FORECAST_SHEET_NAME = "Forecast"
 SIGNALS_SHEET_NAME = "Signals"
 DEFAULT_BUTTERFLY_SEEDS = ["42552", "42555", "42533", "42587"]
 DEFAULT_KARAMBIT_SEEDS = ["42901", "42905", "42911", "42909"]
-DEFAULT_TRACK_KEYWORDS = ["Butterfly Knife", "Karambit"]
+DEFAULT_KNIFE_TYPES = [
+    "Bayonet",
+    "Bowie Knife",
+    "Butterfly Knife",
+    "Classic Knife",
+    "Falchion Knife",
+    "Flip Knife",
+    "Gut Knife",
+    "Huntsman Knife",
+    "Karambit",
+    "Kukri Knife",
+    "M9 Bayonet",
+    "Navaja Knife",
+    "Nomad Knife",
+    "Paracord Knife",
+    "Shadow Daggers",
+    "Skeleton Knife",
+    "Stiletto Knife",
+    "Survival Knife",
+    "Talon Knife",
+    "Ursus Knife",
+]
+DEFAULT_KNIFE_CATEGORIES = {
+    "Bayonet": "weapon_bayonet",
+    "Bowie Knife": "weapon_knife_survival_bowie",
+    "Butterfly Knife": "weapon_knife_butterfly",
+    "Classic Knife": "weapon_knife_css",
+    "Falchion Knife": "weapon_knife_falchion",
+    "Flip Knife": "weapon_knife_flip",
+    "Gut Knife": "weapon_knife_gut",
+    "Huntsman Knife": "weapon_knife_tactical",
+    "Karambit": "weapon_knife_karambit",
+    "Kukri Knife": "weapon_knife_kukri",
+    "M9 Bayonet": "weapon_knife_m9_bayonet",
+    "Navaja Knife": "weapon_knife_gypsy_jackknife",
+    "Nomad Knife": "weapon_knife_outdoor",
+    "Paracord Knife": "weapon_knife_cord",
+    "Shadow Daggers": "weapon_knife_push",
+    "Skeleton Knife": "weapon_knife_skeleton",
+    "Stiletto Knife": "weapon_knife_stiletto",
+    "Survival Knife": "weapon_knife_canis",
+    "Talon Knife": "weapon_knife_widowmaker",
+    "Ursus Knife": "weapon_knife_ursus",
+}
+DEFAULT_KNIFE_FINISHES = [
+    "Doppler",
+    "Gamma Doppler",
+    "Marble Fade",
+    "Fade",
+    "Tiger Tooth",
+    "Slaughter",
+    "Crimson Web",
+    "Case Hardened",
+    "Blue Steel",
+    "Damascus Steel",
+    "Autotronic",
+    "Lore",
+    "Black Laminate",
+    "Freehand",
+    "Bright Water",
+    "Ultraviolet",
+    "Stained",
+    "Vanilla",
+]
+DEFAULT_TRACK_KEYWORDS = DEFAULT_KNIFE_TYPES
 DEFAULT_SQLITE_PATH = "buff163.sqlite3"
+CSGOTRADER_BUFF_URL = "https://prices.csgotrader.app/latest/buff163.json"
+CSGO_API_SKINS_URL = "https://raw.githubusercontent.com/ByMykel/CSGO-API/main/public/api/en/skins.json"
+STEAM_IMAGE_CACHE_PATH = "steam_image_cache.json"
 
 HISTORY_HEADERS = [
     "Timestamp",
@@ -116,7 +184,9 @@ class BuffPriceClient:
     GOODS_MARKET_URL = "https://buff.163.com/api/market/goods"
     GOODS_PAGE_URL = "https://buff.163.com/goods/{goods_id}?from=market#tab=selling"
 
-    def __init__(self, timeout: int = 20) -> None:
+    def __init__(self, timeout: int | None = None) -> None:
+        if timeout is None:
+            timeout = int(os.getenv("BUFF_REQUEST_TIMEOUT", "20"))
         self.timeout = timeout
         self.session = requests.Session()
         self.page_cache: dict[str, dict[str, Any]] = {}
@@ -144,7 +214,7 @@ class BuffPriceClient:
             self.session.headers["Cookie"] = cookie
 
     def _get(self, url: str, **kwargs: Any) -> requests.Response:
-        max_attempts = 5
+        max_attempts = max(1, int(os.getenv("BUFF_MAX_429_ATTEMPTS", "5")))
         for attempt in range(max_attempts):
             response = self.session.get(url, timeout=self.timeout, **kwargs)
             if response.status_code != 429:
@@ -188,12 +258,12 @@ class BuffPriceClient:
             listings=int(page_meta.get("sell_num") or data.get("total_count") or len(items)),
             buy_orders=int(page_meta.get("buy_num") or 0),
             reference_price=try_float(info.get("steam_price_cny")),
-            image_url=(
-                info.get("icon_url")
-                or info.get("original_icon_url")
+            image_url=normalize_image_url(
+                info.get("original_icon_url")
+                or info.get("icon_url")
+                or page_meta.get("original_icon_url")
                 or page_meta.get("icon_url")
                 or page_meta.get("image_url")
-                or ""
             ),
             observed_orders=len(items),
         )
@@ -267,21 +337,42 @@ class BuffPriceClient:
     def discover_high_value_catalog(
         self,
         *,
-        keywords: list[str],
+        keywords: list[str | tuple[str, str | None]],
         min_price: float,
         seed_goods_ids: list[str] | None = None,
         max_pages_per_keyword: int = 20,
+        match_keywords: list[str] | None = None,
+        on_snapshot: Any | None = None,
+        max_goods: int | None = None,
     ) -> list[MarketSnapshot]:
         queue = [str(goods_id) for goods_id in (seed_goods_ids or []) if str(goods_id).strip()]
-        for keyword in keywords:
-            queue.extend(self.discover_goods_ids_from_market(keyword=keyword, max_pages=max_pages_per_keyword))
+        snapshots: dict[str, MarketSnapshot] = {}
+        for query in keywords:
+            keyword, category = query if isinstance(query, tuple) else (query, None)
+            for snapshot in self.discover_snapshots_from_market(
+                keyword=keyword,
+                category=category,
+                min_price=min_price,
+                max_pages=max_pages_per_keyword,
+            ):
+                snapshots[snapshot.goods_id] = snapshot
+                if on_snapshot is not None:
+                    on_snapshot(snapshot)
+                if max_goods is not None and len(snapshots) >= max_goods:
+                    break
+            if max_goods is not None and len(snapshots) >= max_goods:
+                break
+            queue.extend(
+                self.discover_goods_ids_from_market(keyword=keyword, category=category, max_pages=0)
+            )
         queue = sorted(set(queue))
 
         seen: set[str] = set()
-        snapshots: dict[str, MarketSnapshot] = {}
-        keyword_lower = tuple(keyword.lower() for keyword in keywords)
+        keyword_lower = tuple(keyword.lower() for keyword in (match_keywords or keywords))
 
         while queue:
+            if max_goods is not None and len(seen) >= max_goods:
+                break
             goods_id = queue.pop(0)
             if goods_id in seen:
                 continue
@@ -306,7 +397,98 @@ class BuffPriceClient:
             family_lower = snapshot.family.lower()
             if snapshot.price >= min_price and any(keyword in family_lower for keyword in keyword_lower):
                 snapshots[goods_id] = snapshot
+                if on_snapshot is not None:
+                    on_snapshot(snapshot)
             time.sleep(0.35)
+
+        return sorted(
+            snapshots.values(),
+            key=lambda item: (item.family, CONDITION_ORDER.get(item.condition, 50), item.goods_id),
+        )
+
+    def market_item_snapshot(self, item: dict[str, Any]) -> MarketSnapshot | None:
+        goods_id = item.get("id") or item.get("goods_id")
+        if not goods_id:
+            return None
+        info = item.get("goods_info") or item
+        market_hash_name = (
+            info.get("market_hash_name")
+            or item.get("market_hash_name")
+            or info.get("name")
+            or item.get("name")
+            or ""
+        )
+        if not market_hash_name:
+            return None
+        family, condition = split_market_name(market_hash_name)
+        price = try_float(item.get("sell_min_price") or item.get("quick_price") or item.get("sell_reference_price"))
+        if price is None:
+            return None
+        return MarketSnapshot(
+            goods_id=str(goods_id),
+            family=family,
+            skin_name=f"{family} ({condition})" if condition and condition not in family else family,
+            condition=condition or "Unknown",
+            price=price,
+            listings=int(try_float(item.get("sell_num")) or 0),
+            buy_orders=int(try_float(item.get("buy_num")) or 0),
+            reference_price=try_float(item.get("sell_reference_price") or info.get("steam_price_cny")),
+            image_url=normalize_image_url(
+                info.get("original_icon_url")
+                or info.get("icon_url")
+                or item.get("original_icon_url")
+                or item.get("icon_url")
+            ),
+            observed_orders=0,
+        )
+
+    def discover_snapshots_from_market(
+        self,
+        *,
+        keyword: str,
+        category: str | None = None,
+        min_price: float,
+        max_pages: int = 20,
+    ) -> list[MarketSnapshot]:
+        snapshots: dict[str, MarketSnapshot] = {}
+        for page_num in range(1, max_pages + 1):
+            response = self._get(
+                self.GOODS_MARKET_URL,
+                params={
+                    "game": "csgo",
+                    "search": keyword,
+                    **({"category": category} if category else {}),
+                    "min_price": str(int(min_price)),
+                    "page_num": page_num,
+                    "page_size": 80,
+                    "sort_by": "price.desc",
+                    "sort_order": "desc",
+                },
+            )
+            try:
+                response.raise_for_status()
+            except requests.HTTPError as exc:
+                print(f"Failed market search {keyword}: {exc}")
+                break
+            payload = response.json()
+            if payload.get("code") != "OK":
+                print(f"Failed market search {keyword}: BUFF code {payload.get('code')}")
+                break
+
+            data = payload.get("data") or {}
+            items = data.get("items") or []
+            if not items:
+                break
+
+            for item in items:
+                snapshot = self.market_item_snapshot(item)
+                if snapshot and snapshot.price >= min_price:
+                    snapshots[snapshot.goods_id] = snapshot
+
+            total_page = int(data.get("total_page") or 0)
+            if total_page and page_num >= total_page:
+                break
+            time.sleep(float(os.getenv("BUFF_MARKET_PAGE_DELAY", "1.5")))
 
         return sorted(
             snapshots.values(),
@@ -316,18 +498,20 @@ class BuffPriceClient:
     def discover_full_catalog(
         self,
         *,
-        keywords: list[str],
+        keywords: list[str | tuple[str, str | None]],
         seed_goods_ids: list[str] | None = None,
         max_pages_per_keyword: int = 60,
+        match_keywords: list[str] | None = None,
     ) -> list[MarketSnapshot]:
         queue = [str(goods_id) for goods_id in (seed_goods_ids or []) if str(goods_id).strip()]
-        for keyword in keywords:
-            queue.extend(self.discover_goods_ids_from_market(keyword=keyword, max_pages=max_pages_per_keyword))
+        for query in keywords:
+            keyword, category = query if isinstance(query, tuple) else (query, None)
+            queue.extend(self.discover_goods_ids_from_market(keyword=keyword, category=category, max_pages=max_pages_per_keyword))
         queue = sorted(set(queue))
 
         seen: set[str] = set()
         snapshots: dict[str, MarketSnapshot] = {}
-        keyword_lower = tuple(keyword.lower() for keyword in keywords)
+        keyword_lower = tuple(keyword.lower() for keyword in (match_keywords or keywords))
 
         while queue:
             goods_id = queue.pop(0)
@@ -361,7 +545,14 @@ class BuffPriceClient:
             key=lambda item: (item.family, CONDITION_ORDER.get(item.condition, 50), item.goods_id),
         )
 
-    def discover_goods_ids_from_market(self, *, keyword: str, max_pages: int = 20) -> list[str]:
+    def discover_goods_ids_from_market(
+        self,
+        *,
+        keyword: str,
+        category: str | None = None,
+        max_pages: int = 20,
+        min_price: float | None = None,
+    ) -> list[str]:
         goods_ids: set[str] = set()
         for page_num in range(1, max_pages + 1):
             response = self._get(
@@ -369,13 +560,19 @@ class BuffPriceClient:
                 params={
                     "game": "csgo",
                     "search": keyword,
+                    "use_suggestion": "0",
+                    **({"category": category} if category else {}),
                     "page_num": page_num,
                     "page_size": 80,
                     "sort_by": "price.desc",
                     "sort_order": "desc",
                 },
             )
-            response.raise_for_status()
+            try:
+                response.raise_for_status()
+            except requests.HTTPError as exc:
+                print(f"Failed market search {keyword}: {exc}")
+                break
             payload = response.json()
             if payload.get("code") != "OK":
                 break
@@ -385,6 +582,14 @@ class BuffPriceClient:
                 break
 
             for item in items:
+                item_price = try_float(
+                    item.get("sell_min_price")
+                    or item.get("quick_price")
+                    or item.get("sell_reference_price")
+                    or item.get("steam_price_cny")
+                )
+                if min_price is not None and item_price is not None and item_price < min_price:
+                    continue
                 goods_id = item.get("id") or item.get("goods_id")
                 if goods_id:
                     goods_ids.add(str(goods_id))
@@ -715,6 +920,76 @@ def try_float(value: Any) -> float | None:
         return float(str(value).replace(",", ""))
     except Exception:
         return None
+
+
+def normalize_image_url(value: Any) -> str:
+    url = str(value or "").strip()
+    if url.startswith("//"):
+        return f"https:{url}"
+    return url
+
+
+def source_id(prefix: str, value: str) -> str:
+    return f"{prefix}:{hashlib.sha1(value.encode('utf-8')).hexdigest()[:16]}"
+
+
+def load_json_file(path: str) -> dict[str, Any]:
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def save_json_file(path: str, data: dict[str, Any]) -> None:
+    Path(path).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def steam_image_url(market_hash_name: str, cache: dict[str, Any]) -> str:
+    if market_hash_name in cache:
+        return str(cache[market_hash_name] or "")
+    query = market_hash_name.strip()
+    if not query.startswith("★") and ("Knife" in query or "Karambit" in query or "Bayonet" in query):
+        query = f"★ {query}"
+    response = requests.get(
+        "https://steamcommunity.com/market/search/render/",
+        params={
+            "query": query,
+            "start": 0,
+            "count": 1,
+            "search_descriptions": 0,
+            "sort_column": "popular",
+            "sort_dir": "desc",
+            "appid": 730,
+            "norender": 1,
+        },
+        timeout=15,
+    )
+    response.raise_for_status()
+    results = response.json().get("results") or []
+    icon_url = (((results[0] if results else {}).get("asset_description") or {}).get("icon_url") or "").strip()
+    url = f"https://community.fastly.steamstatic.com/economy/image/{icon_url}" if icon_url else ""
+    cache[market_hash_name] = url
+    time.sleep(float(os.getenv("STEAM_IMAGE_DELAY", "0.25")))
+    return url
+
+
+def csgo_api_image_map() -> dict[str, str]:
+    response = requests.get(CSGO_API_SKINS_URL, timeout=30)
+    response.raise_for_status()
+    images: dict[str, str] = {}
+    for item in response.json():
+        name = str(item.get("name") or "").replace("★ ", "").strip()
+        image = str(item.get("image") or "").strip()
+        if not name or not image:
+            continue
+        images[name] = image
+        images[f"StatTrak™ {name}"] = image
+        for wear in item.get("wears") or []:
+            wear_name = str((wear or {}).get("name") or "").strip()
+            if wear_name:
+                images[f"{name} ({wear_name})"] = image
+                images[f"StatTrak™ {name} ({wear_name})"] = image
+    return images
 
 
 def env_flag(name: str, default: bool = False) -> bool:
@@ -1084,13 +1359,12 @@ def rebuild_forecast(store: SheetStore, history: pd.DataFrame) -> None:
 
 def get_seed_goods_ids() -> list[str]:
     raw = os.getenv("BUFF_SEED_GOODS_IDS")
-    if raw:
+    if raw is not None:
         return [item.strip() for item in raw.split(",") if item.strip()]
     legacy_raw = os.getenv("BUFF_BUTTERFLY_SEEDS")
     if legacy_raw:
         return [item.strip() for item in legacy_raw.split(",") if item.strip()]
-    raw = ",".join(DEFAULT_BUTTERFLY_SEEDS + DEFAULT_KARAMBIT_SEEDS)
-    return [item.strip() for item in raw.split(",") if item.strip()]
+    return []
 
 
 def get_track_keywords() -> list[str]:
@@ -1098,21 +1372,92 @@ def get_track_keywords() -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
+def get_search_keywords(track_keywords: list[str]) -> list[str | tuple[str, str | None]]:
+    raw = os.getenv("BUFF_SEARCH_KEYWORDS")
+    if raw:
+        return [item.strip() for item in raw.split(",") if item.strip()]
+    searches: list[str | tuple[str, str | None]] = []
+    for knife in track_keywords:
+        category = DEFAULT_KNIFE_CATEGORIES.get(knife)
+        searches.append((knife, category))
+        searches.extend((finish, category) for finish in DEFAULT_KNIFE_FINISHES)
+    return searches
+
+
+def csgotrader_snapshots(track_keywords: list[str], min_price_cny: float) -> list[MarketSnapshot]:
+    if env_flag("BUFF_LISTINGS_ONLY_DIRECT", True):
+        return []
+    usd_to_cny = float(os.getenv("BUFF_USD_CNY", "7.2"))
+    response = requests.get(CSGOTRADER_BUFF_URL, timeout=30)
+    response.raise_for_status()
+    keyword_lower = tuple(keyword.lower() for keyword in track_keywords)
+    image_map = csgo_api_image_map() if env_flag("BUFF_FILL_IMAGES", True) else {}
+    fill_images = env_flag("BUFF_FILL_STEAM_IMAGES", False)
+    image_cache = load_json_file(STEAM_IMAGE_CACHE_PATH) if fill_images else {}
+    snapshots: list[MarketSnapshot] = []
+    for market_hash_name, value in response.json().items():
+        market_hash_name = str(market_hash_name).replace("БЪ", "★")
+        clean_name = market_hash_name.replace("★ ", "").strip()
+        if not any(keyword in clean_name.lower() for keyword in keyword_lower):
+            continue
+        family, condition = split_market_name(clean_name)
+        starting_at = value.get("starting_at") or {}
+        highest_order = value.get("highest_order") or {}
+        price_usd = try_float(starting_at.get("price"))
+        if price_usd is None:
+            continue
+        price = price_usd * usd_to_cny
+        if price < min_price_cny:
+            continue
+        image_url = image_map.get(clean_name, "") or image_map.get(family, "")
+        if fill_images:
+            try:
+                image_url = image_url or steam_image_url(str(market_hash_name), image_cache)
+            except Exception as exc:
+                print(f"Failed Steam image {market_hash_name}: {exc}")
+        snapshots.append(
+            MarketSnapshot(
+                goods_id=source_id("csgotrader", market_hash_name),
+                family=family,
+                skin_name=f"{family} ({condition})" if condition and condition not in family else family,
+                condition=condition or "Unknown",
+                price=price,
+                listings=0,
+                buy_orders=0,
+                reference_price=try_float((highest_order or {}).get("price")) * usd_to_cny
+                if try_float((highest_order or {}).get("price")) is not None
+                else None,
+                image_url=image_url,
+                observed_orders=0,
+            )
+        )
+    if fill_images:
+        save_json_file(STEAM_IMAGE_CACHE_PATH, image_cache)
+    return sorted(snapshots, key=lambda item: (item.family, CONDITION_ORDER.get(item.condition, 50), item.goods_id))
+
+
 def run(migrate_only: bool = False) -> None:
-    store = SheetStore(SHEET_NAME)
+    sqlite_path = os.getenv("BUFF_SQLITE_PATH", DEFAULT_SQLITE_PATH).strip()
+    enable_sqlite = env_flag("BUFF_WRITE_SQLITE", False)
+    write_sheets = env_flag("BUFF_WRITE_SHEETS", not enable_sqlite)
+    store = SheetStore(SHEET_NAME) if write_sheets or migrate_only or env_flag("BUFF_RUN_MIGRATION", False) else None
     run_migration = migrate_only or env_flag("BUFF_RUN_MIGRATION", False)
     if run_migration:
+        if store is None:
+            raise ValueError("Sheet migration requires Google Sheets.")
         migrated_rows = migrate_history_sheet(store)
         if migrated_rows:
             print(f"Migrated {migrated_rows} history rows to the current schema.")
     else:
         print("Skipping migration for this run (BUFF_RUN_MIGRATION is disabled).")
 
-    history = load_history_frame(store)
+    history = load_history_frame(store) if store is not None else sqlite_load_history_frame(sqlite_path)
     if migrate_only:
         agent = PriceAnalysisAgent(history)
         tracked_names = sorted(history["Skin Name"].dropna().unique().tolist())
         analysis_rows = [summary for name in tracked_names if (summary := agent.summarize_skin(name))]
+        if store is None:
+            raise ValueError("Migration-only run requires Google Sheets.")
         rebuild_dashboard(store, analysis_rows)
         rebuild_signals(store, analysis_rows, datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"))
         if env_flag("BUFF_ENABLE_FORECAST", True):
@@ -1122,34 +1467,64 @@ def run(migrate_only: bool = False) -> None:
 
     client = BuffPriceClient()
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-    min_price = float(os.getenv("BUFF_MIN_PRICE_CNY", "5000"))
+    min_price = float(os.getenv("BUFF_MIN_PRICE_CNY", "0"))
     try:
         high_value_pages = max(1, int(os.getenv("BUFF_HIGH_VALUE_PAGES", "25")))
     except ValueError:
         high_value_pages = 25
     track_keywords = get_track_keywords()
-    snapshots = client.discover_high_value_catalog(
-        keywords=track_keywords,
-        min_price=min_price,
-        seed_goods_ids=get_seed_goods_ids(),
-        max_pages_per_keyword=high_value_pages,
-    )
+    search_keywords = get_search_keywords(track_keywords)
+    snapshots: list[MarketSnapshot] = []
+    if not env_flag("BUFF_SKIP_DIRECT", False):
+        max_goods_raw = os.getenv("BUFF_MAX_GOODS_PER_RUN", "").strip()
+        max_goods = int(max_goods_raw) if max_goods_raw else None
+        snapshots = client.discover_high_value_catalog(
+            keywords=search_keywords,
+            min_price=min_price,
+            seed_goods_ids=get_seed_goods_ids(),
+            max_pages_per_keyword=high_value_pages,
+            match_keywords=track_keywords,
+            max_goods=max_goods,
+            on_snapshot=(
+                (lambda snapshot: sqlite_write_snapshots(sqlite_path, [snapshot], timestamp))
+                if enable_sqlite and sqlite_path and not write_sheets
+                else None
+            ),
+        )
+    if env_flag("BUFF_FALLBACK_CSGOTRADER", False):
+        fallback_snapshots = csgotrader_snapshots(track_keywords, min_price)
+        snapshots_by_id = {snapshot.goods_id: snapshot for snapshot in snapshots}
+        snapshots_by_id.update({snapshot.goods_id: snapshot for snapshot in fallback_snapshots})
+        snapshots = sorted(
+            snapshots_by_id.values(),
+            key=lambda item: (item.family, CONDITION_ORDER.get(item.condition, 50), item.goods_id),
+        )
+        if enable_sqlite and sqlite_path and not write_sheets:
+            sqlite_write_snapshots(sqlite_path, fallback_snapshots, timestamp)
 
     full_catalog_enabled = os.getenv("BUFF_FULL_CATALOG", "").strip().lower() in {"1", "true", "yes", "on"}
     if full_catalog_enabled:
         max_pages = int(os.getenv("BUFF_FULL_CATALOG_PAGES", "60"))
         full_snapshots = client.discover_full_catalog(
-            keywords=track_keywords,
+            keywords=search_keywords,
             seed_goods_ids=get_seed_goods_ids(),
             max_pages_per_keyword=max_pages,
+            match_keywords=track_keywords,
         )
         rebuild_all_catalog(store, full_snapshots, timestamp)
 
-    sqlite_path = os.getenv("BUFF_SQLITE_PATH", DEFAULT_SQLITE_PATH).strip()
-    enable_sqlite = os.getenv("BUFF_WRITE_SQLITE", "").strip().lower() in {"1", "true", "yes", "on"}
-    if enable_sqlite and sqlite_path:
+    if enable_sqlite and sqlite_path and write_sheets:
         sqlite_write_snapshots(sqlite_path, snapshots, timestamp)
 
+    if not write_sheets:
+        print(
+            f"Collected {len(snapshots)} high-value snapshots for {', '.join(track_keywords)} "
+            f"(>= {min_price:.0f} CNY, pages={high_value_pages})."
+        )
+        return
+
+    if store is None:
+        raise ValueError("Google Sheets output is enabled but no sheet store is configured.")
     rebuild_catalog(store, snapshots)
     append_history(store, snapshots, timestamp)
 

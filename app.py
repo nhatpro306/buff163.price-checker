@@ -15,6 +15,7 @@ from main import (
     CATALOG_SHEET_NAME,
     CONDITION_ORDER,
     FORECAST_SHEET_NAME,
+    DEFAULT_TRACK_KEYWORDS,
     SHEET_NAME,
     SheetStore,
     load_history_frame,
@@ -31,10 +32,32 @@ from app_data_utils import (
 REFRESH_SECONDS = int(os.getenv("BUFF_UI_REFRESH_SEC", "900"))
 CACHE_TTL_SECONDS = int(os.getenv("BUFF_UI_CACHE_TTL_SEC", "300"))
 st_autorefresh(interval=max(30, REFRESH_SECONDS) * 1000, key="buff_refresh")
-st.set_page_config(page_title="BUFF163 High-Value Knife Market", layout="wide")
+st.set_page_config(page_title="CS2 Skin Market", layout="wide")
 
-TRACK_KEYWORDS = ("Butterfly Knife", "Karambit")
-HIGH_VALUE_MIN_PRICE = float(os.getenv("BUFF_MIN_PRICE_CNY", "5000"))
+TRACK_KEYWORDS = tuple(DEFAULT_TRACK_KEYWORDS)
+HIGH_VALUE_MIN_PRICE = float(os.getenv("BUFF_MIN_PRICE_CNY", "0"))
+
+
+def base_knife_type(value: object) -> str:
+    return str(value or "").replace("StatTrak™ ", "", 1).strip()
+
+
+def knife_tile_image(frame: pd.DataFrame) -> str:
+    priority = (
+        "Doppler",
+        "Gamma Doppler",
+        "Marble Fade",
+        "Fade",
+        "Tiger Tooth",
+        "Slaughter",
+        "Crimson Web",
+        "Case Hardened",
+    )
+    for finish in priority:
+        image_url = choose_image_url(frame[frame["Family"].str.contains(finish, case=False, na=False)])
+        if image_url:
+            return image_url
+    return choose_image_url(frame.sort_values("Timestamp"))
 
 
 @st.cache_resource(show_spinner=False)
@@ -96,9 +119,9 @@ def inject_styles() -> None:
             padding: 0.9rem 1.2rem;
             background: rgba(9, 14, 24, 0.82);
             border: 1px solid rgba(84, 102, 136, 0.35);
-            border-radius: 18px;
+            border-radius: 8px;
             margin-bottom: 1rem;
-            box-shadow: 0 18px 45px rgba(0, 0, 0, 0.22);
+            box-shadow: 0 12px 30px rgba(0, 0, 0, 0.24);
         }
         .buff-brand {
             display: flex;
@@ -110,18 +133,85 @@ def inject_styles() -> None:
         .buff-badge {
             width: 38px;
             height: 38px;
-            border-radius: 12px;
-            background: linear-gradient(135deg, #6178c4 0%, #3f5d9e 100%);
+            border-radius: 8px;
+            background: linear-gradient(135deg, #d88b35 0%, #5f7bd0 100%);
             display: flex;
             align-items: center;
             justify-content: center;
             color: white;
             font-weight: 900;
         }
+        .buff-picker-title {
+            color: var(--muted) !important;
+            font-size: 0.86rem;
+            font-weight: 700;
+            margin: 0.8rem 0 0.55rem;
+            text-transform: uppercase;
+        }
+        .buff-knife-tile {
+            height: 98px;
+            border: 1px solid rgba(120, 138, 173, 0.28);
+            border-radius: 8px;
+            background:
+                radial-gradient(circle at center, rgba(228, 144, 55, 0.13), transparent 48%),
+                linear-gradient(180deg, rgba(36, 47, 64, 0.92), rgba(17, 24, 35, 0.96));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.5rem;
+            margin-bottom: 0.35rem;
+            overflow: hidden;
+        }
+        .buff-knife-tile img {
+            width: 100%;
+            height: 84px;
+            object-fit: contain;
+            filter: drop-shadow(0 14px 15px rgba(0, 0, 0, 0.44));
+        }
+        .buff-knife-tile-active {
+            border-color: rgba(228, 144, 55, 0.78);
+            background:
+                radial-gradient(circle at center, rgba(228, 144, 55, 0.22), transparent 50%),
+                linear-gradient(180deg, rgba(46, 57, 75, 0.96), rgba(20, 27, 38, 0.98));
+        }
+        .buff-selected-label {
+            color: #f6b35d !important;
+            font-size: 0.78rem;
+            font-weight: 800;
+            min-height: 1rem;
+            margin-bottom: 0.15rem;
+            text-align: center;
+        }
+        .buff-knife-empty {
+            width: 100%;
+            height: 72px;
+            background: rgba(120, 138, 173, 0.08);
+            border-radius: 6px;
+        }
+        div[data-testid="stButton"] > button {
+            background: rgba(245, 247, 251, 0.08) !important;
+            border: 1px solid rgba(170, 182, 202, 0.32) !important;
+            color: #f5f7fb !important;
+            border-radius: 8px !important;
+            min-height: 2.6rem;
+            font-weight: 700 !important;
+        }
+        div[data-testid="stButton"] > button p,
+        div[data-testid="stButton"] > button span {
+            color: #f5f7fb !important;
+        }
+        div[data-testid="stButton"] > button:hover {
+            background: rgba(228, 144, 55, 0.22) !important;
+            border-color: rgba(228, 144, 55, 0.75) !important;
+            color: #ffffff !important;
+        }
+        div[data-testid="stButton"] > button:focus {
+            box-shadow: 0 0 0 2px rgba(228, 144, 55, 0.35) !important;
+        }
         .buff-hero {
             background: linear-gradient(135deg, rgba(25, 33, 47, 0.95) 0%, rgba(31, 37, 48, 0.96) 100%);
             border: 1px solid rgba(95, 111, 142, 0.35);
-            border-radius: 26px;
+            border-radius: 8px;
             padding: 1.2rem;
             margin-bottom: 1rem;
             box-shadow: 0 24px 55px rgba(0, 0, 0, 0.24);
@@ -141,7 +231,7 @@ def inject_styles() -> None:
             background:
                 radial-gradient(circle at center, rgba(112, 143, 208, 0.18), transparent 40%),
                 linear-gradient(180deg, #2a3549 0%, #364761 100%);
-            border-radius: 18px;
+            border-radius: 8px;
             min-height: 300px;
             display: flex;
             align-items: center;
@@ -325,7 +415,7 @@ history_df = prepare_history_frame(history_df)
 history_df = filter_high_value_families(history_df, TRACK_KEYWORDS, HIGH_VALUE_MIN_PRICE)
 
 if history_df.empty:
-    st.warning(f"No Butterfly/Karambit families above {HIGH_VALUE_MIN_PRICE:,.0f} CNY yet. Run `python main.py` to refresh.")
+    st.warning(f"No knife families above {HIGH_VALUE_MIN_PRICE:,.0f} CNY yet. Run `python main.py` to refresh.")
     st.stop()
     raise SystemExit(0)
 
@@ -334,25 +424,54 @@ st.markdown(
     <div class="buff-nav">
       <div class="buff-brand">
         <div class="buff-badge">B</div>
-        <div>BUFF163 High-Value Knife Market</div>
+        <div>CS2 Skin Market</div>
       </div>
-      <div style="color:#aab6ca;">Butterfly + Karambit tracker (5,000+ CNY) with condition tabs, sell count, buy depth, and daily history.</div>
+      <div style="color:#aab6ca;">Knife market prices, images, and history.</div>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
 family_names = sorted(history_df["Family"].dropna().unique().tolist())
-search_term = st.text_input(
-    "Search knife family",
-    placeholder="Search: Karambit Doppler, Butterfly Tiger Tooth",
-    label_visibility="collapsed",
-)
-filtered_families = [name for name in family_names if search_term.lower() in name.lower()] if search_term else family_names
-if not filtered_families:
-    filtered_families = family_names
 
-family_selected = st.selectbox("Family", filtered_families, label_visibility="collapsed")
+history_df["_Base Knife"] = history_df.get("Knife Type", history_df["Family"].str.split("|").str[0]).map(base_knife_type)
+knife_counts = history_df.groupby("_Base Knife")["Family"].nunique().sort_index()
+knife_types = [knife for knife in DEFAULT_TRACK_KEYWORDS if knife in knife_counts.index]
+if "selected_knife_type" not in st.session_state or st.session_state["selected_knife_type"] not in knife_types:
+    st.session_state["selected_knife_type"] = knife_types[0] if knife_types else ""
+
+st.markdown('<div class="buff-picker-title">Choose knife type</div>', unsafe_allow_html=True)
+for row_start in range(0, len(knife_types), 5):
+    cols = st.columns(5)
+    for col, knife_type in zip(cols, knife_types[row_start:row_start + 5]):
+        knife_df = history_df[history_df["_Base Knife"] == knife_type].copy()
+        image_url = knife_tile_image(knife_df.sort_values("Timestamp"))
+        active_class = " buff-knife-tile-active" if st.session_state["selected_knife_type"] == knife_type else ""
+        with col:
+            st.markdown(
+                f"""
+                <div class="buff-selected-label">{'Selected' if active_class else '&nbsp;'}</div>
+                <div class="buff-knife-tile{active_class}">
+                  {f'<img src="{image_url}" alt="{knife_type}">' if image_url else '<div class="buff-knife-empty"></div>'}
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            if st.button(f"{knife_type} ({int(knife_counts[knife_type])})", key=f"knife_{knife_type}", width="stretch"):
+                st.session_state["selected_knife_type"] = knife_type
+
+selected_knife_type = st.session_state["selected_knife_type"]
+scoped_names = sorted(history_df.loc[history_df["_Base Knife"] == selected_knife_type, "Family"].dropna().unique().tolist())
+filtered_families = scoped_names
+if not filtered_families:
+    filtered_families = scoped_names or family_names
+
+family_selected = st.selectbox(
+    "Family",
+    filtered_families,
+    label_visibility="collapsed",
+    placeholder=f"{selected_knife_type} skins",
+)
 family_df = history_df[history_df["Family"] == family_selected].copy()
 
 condition_latest = (
@@ -375,10 +494,11 @@ condition_selected = condition_map[selected_condition_label]
 
 variant_df = family_df[family_df["Condition"] == condition_selected].copy().sort_values("Timestamp")
 latest = variant_df.iloc[-1]
-image_url = choose_image_url(variant_df, family_df, history_df)
+image_url = choose_image_url(variant_df)
 reference_price = float(latest["Reference Price"]) if pd.notna(latest["Reference Price"]) else float(latest["Price"])
 buy_orders = int(latest["Buy Orders"]) if pd.notna(latest["Buy Orders"]) else 0
 sell_stock = int(latest["Listings"]) if pd.notna(latest["Listings"]) else 0
+listing_source = "BUFF" if sell_stock > 0 else "BUFF unavailable"
 knife_category = family_selected.split("|")[0].strip()
 
 st.markdown(
@@ -398,7 +518,7 @@ st.markdown(
           </div>
           <div class="buff-statline">
             <div class="buff-ref">Reference price <strong>{reference_price:,.2f} CNY</strong></div>
-            <div class="buff-ref">Sell stock <strong style="font-size:1.3rem;">{sell_stock}</strong></div>
+            <div class="buff-ref">Listings <strong style="font-size:1.3rem;">{sell_stock if sell_stock else 'N/A'}</strong><br><span>{listing_source}</span></div>
             <div class="buff-ref">Buy orders <strong style="font-size:1.3rem;">{buy_orders}</strong></div>
           </div>
         </div>
@@ -410,11 +530,15 @@ st.markdown(
 
 metric_cols = st.columns(4)
 metric_cols[0].metric("Lowest Sell", f"{float(latest['Price']):,.2f} CNY")
-metric_cols[1].metric("Sell", sell_stock)
+metric_cols[1].metric("Listings", sell_stock if sell_stock else "N/A", help=f"Source: {listing_source}")
 metric_cols[2].metric("Buy Orders", buy_orders)
 metric_cols[3].metric("Last Update", latest["Timestamp"].strftime("%Y-%m-%d"))
+if listing_source == "BUFF unavailable":
+    st.caption("BUFF listings are unavailable for this fallback-imported skin. Set `BUFF_COOKIE` and run direct BUFF refresh to fill listings.")
 
 daily_df = variant_df.copy()
+if "Listings" in daily_df.columns:
+    daily_df.loc[daily_df["Listings"].fillna(0) <= 0, "Listings"] = pd.NA
 daily_df["Day"] = daily_df["Timestamp"].dt.date
 daily_df = (
     daily_df.groupby("Day", as_index=False)
