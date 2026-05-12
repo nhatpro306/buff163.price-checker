@@ -79,7 +79,7 @@ def merge_fallback_history(history: pd.DataFrame) -> pd.DataFrame:
     history["_Fallback Current"] = 0
     merged = pd.concat([history, fallback], ignore_index=True)
     merged["Timestamp"] = pd.to_datetime(merged["Timestamp"], errors="coerce", utc=True)
-    return merged.sort_values(["Timestamp", "_Fallback Current"]).drop(columns=["_Fallback Current"])
+    return merged.sort_values(["_Fallback Current", "Timestamp"]).drop(columns=["_Fallback Current"])
 
 
 def base_knife_type(value: object) -> str:
@@ -526,7 +526,7 @@ family_df = history_df[history_df["Family"] == family_selected].copy()
 condition_latest = (
     family_df.sort_values("Timestamp")
     .assign(_source_key=lambda frame: frame.get("Source", pd.Series("", index=frame.index)).eq("Fallback").astype(int))
-    .sort_values(["Timestamp", "_source_key"])
+    .sort_values(["_source_key", "Timestamp"])
     .groupby("Condition", as_index=False)
     .tail(1)
     .assign(_sort_key=lambda frame: frame["Condition"].map(lambda value: CONDITION_ORDER.get(str(value), 50)))
@@ -547,7 +547,7 @@ variant_df = (
     family_df[family_df["Condition"] == condition_selected]
     .copy()
     .assign(_source_key=lambda frame: frame.get("Source", pd.Series("", index=frame.index)).eq("Fallback").astype(int))
-    .sort_values(["Timestamp", "_source_key"])
+    .sort_values(["_source_key", "Timestamp"])
 )
 latest = variant_df.iloc[-1]
 image_url = choose_image_url(variant_df)
