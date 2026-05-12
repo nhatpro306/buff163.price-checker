@@ -9,6 +9,7 @@ import os
 import re
 import sqlite3
 import time
+from http.cookies import SimpleCookie
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -212,6 +213,14 @@ class BuffPriceClient:
         cookie = os.getenv("BUFF_COOKIE")
         if cookie:
             self.session.headers["Cookie"] = cookie
+            parsed_cookie = SimpleCookie()
+            try:
+                parsed_cookie.load(cookie)
+                csrf_token = parsed_cookie.get("csrf_token")
+            except Exception:
+                csrf_token = None
+            if csrf_token:
+                self.session.headers["X-CSRFToken"] = csrf_token.value
 
     def _get(self, url: str, **kwargs: Any) -> requests.Response:
         max_attempts = max(1, int(os.getenv("BUFF_MAX_429_ATTEMPTS", "5")))
@@ -1376,11 +1385,13 @@ def get_search_keywords(track_keywords: list[str]) -> list[str | tuple[str, str 
     raw = os.getenv("BUFF_SEARCH_KEYWORDS")
     if raw:
         return [item.strip() for item in raw.split(",") if item.strip()]
+    expand_finishes = env_flag("BUFF_EXPAND_FINISH_SEARCHES", False)
     searches: list[str | tuple[str, str | None]] = []
     for knife in track_keywords:
         category = DEFAULT_KNIFE_CATEGORIES.get(knife)
         searches.append((knife, category))
-        searches.extend((finish, category) for finish in DEFAULT_KNIFE_FINISHES)
+        if expand_finishes:
+            searches.extend((finish, category) for finish in DEFAULT_KNIFE_FINISHES)
     return searches
 
 
