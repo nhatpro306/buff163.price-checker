@@ -126,12 +126,16 @@ def live_buff_listing(family: str, condition: str, knife_type: str) -> dict[str,
         return {}
     category = DEFAULT_KNIFE_CATEGORIES.get(base_knife_type(knife_type))
     try:
-        snapshots = BuffPriceClient(timeout=15).discover_snapshots_from_market(
-            keyword=family,
-            category=category,
-            min_price=0,
-            max_pages=1,
-        )
+        client = BuffPriceClient(timeout=15)
+        snapshots = client.discover_snapshots_from_market(keyword=family, category=category, min_price=0, max_pages=1)
+        if not snapshots:
+            skin_finish = family.split("|", 1)[-1].strip() if "|" in family else family
+            snapshots = client.discover_snapshots_from_market(
+                keyword=skin_finish,
+                category=category,
+                min_price=0,
+                max_pages=1,
+            )
     except Exception:
         return {}
     for snapshot in snapshots:
@@ -667,7 +671,7 @@ metric_cols[1].metric("Listings", sell_stock if sell_stock else "N/A", help=f"So
 metric_cols[2].metric("Buy Orders", buy_orders)
 metric_cols[3].metric("Last Update", latest["Timestamp"].strftime("%Y-%m-%d"))
 if listing_source == "BUFF unavailable":
-    st.caption("BUFF listings are unavailable for this fallback-imported skin. Set `BUFF_COOKIE` and run direct BUFF refresh to fill listings.")
+    st.caption("Live BUFF listings are unavailable for this selected skin. Check `BUFF_COOKIE`, then wait for cache refresh or run the tracker.")
 
 daily_df = variant_df.copy()
 if "Listings" in daily_df.columns:
