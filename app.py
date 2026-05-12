@@ -63,6 +63,18 @@ def fallback_history_frame() -> pd.DataFrame:
     )
 
 
+def merge_fallback_history(history: pd.DataFrame) -> pd.DataFrame:
+    if os.getenv("BUFF_APP_FALLBACK_CSGOTRADER", "1").strip().lower() not in {"1", "true", "yes", "on"}:
+        return history
+    try:
+        fallback = fallback_history_frame()
+    except Exception:
+        return history
+    if history.empty:
+        return fallback
+    return pd.concat([history, fallback], ignore_index=True)
+
+
 def base_knife_type(value: object) -> str:
     return str(value or "").replace("StatTrak™ ", "", 1).strip()
 
@@ -431,6 +443,8 @@ if startup_error is not None:
 
 if history_df.empty:
     history_df = fallback_history_frame()
+
+history_df = merge_fallback_history(history_df)
 
 required_cols = {"Timestamp", "Price", "Listings", "Family", "Skin Name", "Condition"}
 if not required_cols.issubset(set(history_df.columns)):
