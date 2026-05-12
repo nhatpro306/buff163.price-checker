@@ -175,3 +175,8 @@ cython_debug/
 
 # Local nested duplicate repository copy (not part of deployable root app)
 buff163.price-checker/
+
+node_modules/
+coverage/
+logs/
+.tmp/
