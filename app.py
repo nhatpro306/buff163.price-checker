@@ -171,19 +171,21 @@ def inject_styles() -> None:
         """
         <style>
         :root {
-            --bg-top: #10182a;
-            --bg-main: #182235;
+            --bg-top: #0d1422;
+            --bg-main: #172233;
             --line: #2f3d56;
-            --accent: #4f6fb6;
-            --accent-2: #e49037;
+            --accent: #5076c8;
+            --accent-2: #f0a23b;
             --text: #f5f7fb;
             --muted: #aab6ca;
             --soft: #d9dfeb;
+            --panel: rgba(18, 25, 37, 0.88);
         }
         .stApp {
             background:
-                radial-gradient(circle at top right, rgba(97, 140, 220, 0.12), transparent 25%),
-                linear-gradient(180deg, var(--bg-top) 0%, var(--bg-main) 26%, #101722 100%);
+                radial-gradient(circle at 85% 0%, rgba(240, 162, 59, 0.13), transparent 24rem),
+                radial-gradient(circle at 10% 12%, rgba(80, 118, 200, 0.16), transparent 26rem),
+                linear-gradient(180deg, var(--bg-top) 0%, var(--bg-main) 30%, #0f1622 100%);
             color: var(--text);
         }
         .stApp, .stApp p, .stApp span, .stApp div, .stApp label, .stApp li {
@@ -202,30 +204,36 @@ def inject_styles() -> None:
             justify-content: space-between;
             align-items: center;
             gap: 1rem;
-            padding: 0.9rem 1.2rem;
-            background: rgba(9, 14, 24, 0.82);
-            border: 1px solid rgba(84, 102, 136, 0.35);
+            padding: 1rem 1.15rem;
+            background: linear-gradient(135deg, rgba(11, 17, 28, 0.92), rgba(25, 34, 49, 0.86));
+            border: 1px solid rgba(126, 146, 184, 0.28);
             border-radius: 8px;
-            margin-bottom: 1rem;
-            box-shadow: 0 12px 30px rgba(0, 0, 0, 0.24);
+            margin-bottom: 1.1rem;
+            box-shadow: 0 18px 45px rgba(0, 0, 0, 0.26);
+            backdrop-filter: blur(10px);
         }
         .buff-brand {
             display: flex;
             align-items: center;
             gap: 0.8rem;
-            font-weight: 700;
-            letter-spacing: 0.02em;
+            font-weight: 800;
+            font-size: 1.05rem;
         }
         .buff-badge {
-            width: 38px;
-            height: 38px;
+            width: 42px;
+            height: 42px;
             border-radius: 8px;
-            background: linear-gradient(135deg, #d88b35 0%, #5f7bd0 100%);
+            background: linear-gradient(135deg, #f0a23b 0%, #5076c8 100%);
             display: flex;
             align-items: center;
             justify-content: center;
             color: white;
             font-weight: 900;
+            box-shadow: 0 10px 24px rgba(240, 162, 59, 0.22);
+        }
+        .buff-nav-subtitle {
+            color: #aab6ca !important;
+            font-size: 0.92rem;
         }
         .buff-picker-title {
             color: var(--muted) !important;
@@ -235,12 +243,12 @@ def inject_styles() -> None:
             text-transform: uppercase;
         }
         .buff-knife-tile {
-            height: 98px;
-            border: 1px solid rgba(120, 138, 173, 0.28);
+            height: 104px;
+            border: 1px solid rgba(129, 149, 184, 0.28);
             border-radius: 8px;
             background:
-                radial-gradient(circle at center, rgba(228, 144, 55, 0.13), transparent 48%),
-                linear-gradient(180deg, rgba(36, 47, 64, 0.92), rgba(17, 24, 35, 0.96));
+                radial-gradient(circle at center, rgba(240, 162, 59, 0.13), transparent 50%),
+                linear-gradient(180deg, rgba(32, 43, 61, 0.95), rgba(14, 20, 31, 0.98));
             display: flex;
             align-items: center;
             justify-content: center;
@@ -252,13 +260,14 @@ def inject_styles() -> None:
             width: 100%;
             height: 84px;
             object-fit: contain;
-            filter: drop-shadow(0 14px 15px rgba(0, 0, 0, 0.44));
+            filter: drop-shadow(0 16px 16px rgba(0, 0, 0, 0.46));
         }
         .buff-knife-tile-active {
-            border-color: rgba(228, 144, 55, 0.78);
+            border-color: rgba(240, 162, 59, 0.9);
             background:
-                radial-gradient(circle at center, rgba(228, 144, 55, 0.22), transparent 50%),
-                linear-gradient(180deg, rgba(46, 57, 75, 0.96), rgba(20, 27, 38, 0.98));
+                radial-gradient(circle at center, rgba(240, 162, 59, 0.24), transparent 52%),
+                linear-gradient(180deg, rgba(47, 59, 79, 0.98), rgba(18, 25, 37, 0.99));
+            box-shadow: inset 0 0 0 1px rgba(240, 162, 59, 0.18), 0 12px 26px rgba(0, 0, 0, 0.22);
         }
         .buff-selected-label {
             color: #f6b35d !important;
@@ -275,32 +284,36 @@ def inject_styles() -> None:
             border-radius: 6px;
         }
         div[data-testid="stButton"] > button {
-            background: rgba(245, 247, 251, 0.08) !important;
-            border: 1px solid rgba(170, 182, 202, 0.32) !important;
+            background: rgba(245, 247, 251, 0.075) !important;
+            border: 1px solid rgba(170, 182, 202, 0.28) !important;
             color: #f5f7fb !important;
             border-radius: 8px !important;
             min-height: 2.6rem;
             font-weight: 700 !important;
+            transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
         }
         div[data-testid="stButton"] > button p,
         div[data-testid="stButton"] > button span {
             color: #f5f7fb !important;
         }
         div[data-testid="stButton"] > button:hover {
-            background: rgba(228, 144, 55, 0.22) !important;
-            border-color: rgba(228, 144, 55, 0.75) !important;
+            background: rgba(240, 162, 59, 0.2) !important;
+            border-color: rgba(240, 162, 59, 0.78) !important;
             color: #ffffff !important;
+            transform: translateY(-1px);
         }
         div[data-testid="stButton"] > button:focus {
             box-shadow: 0 0 0 2px rgba(228, 144, 55, 0.35) !important;
         }
         .buff-hero {
-            background: linear-gradient(135deg, rgba(25, 33, 47, 0.95) 0%, rgba(31, 37, 48, 0.96) 100%);
-            border: 1px solid rgba(95, 111, 142, 0.35);
+            background:
+                radial-gradient(circle at 20% 8%, rgba(240, 162, 59, 0.13), transparent 18rem),
+                linear-gradient(135deg, rgba(18, 25, 37, 0.96) 0%, rgba(28, 38, 55, 0.96) 100%);
+            border: 1px solid rgba(126, 146, 184, 0.32);
             border-radius: 8px;
-            padding: 1.2rem;
+            padding: 1.25rem;
             margin-bottom: 1rem;
-            box-shadow: 0 24px 55px rgba(0, 0, 0, 0.24);
+            box-shadow: 0 28px 65px rgba(0, 0, 0, 0.28);
         }
         .buff-breadcrumb {
             color: var(--muted) !important;
@@ -315,8 +328,9 @@ def inject_styles() -> None:
         }
         .buff-image-card {
             background:
-                radial-gradient(circle at center, rgba(112, 143, 208, 0.18), transparent 40%),
-                linear-gradient(180deg, #2a3549 0%, #364761 100%);
+                radial-gradient(circle at center, rgba(240, 162, 59, 0.14), transparent 36%),
+                radial-gradient(circle at 70% 18%, rgba(112, 143, 208, 0.2), transparent 42%),
+                linear-gradient(180deg, #253247 0%, #344761 100%);
             border-radius: 8px;
             min-height: 300px;
             display: flex;
@@ -334,10 +348,11 @@ def inject_styles() -> None:
             filter: drop-shadow(0 18px 24px rgba(0, 0, 0, 0.35));
         }
         .buff-title {
-            font-size: 2.05rem;
+            font-size: 2.2rem;
             font-weight: 700;
             margin: 0 0 0.65rem 0;
             color: var(--text) !important;
+            line-height: 1.1;
         }
         .buff-submeta {
             display: flex;
@@ -348,26 +363,29 @@ def inject_styles() -> None:
             margin-bottom: 1rem;
         }
         .buff-statline {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 2rem;
-            align-items: baseline;
-            margin-bottom: 1rem;
-            padding-bottom: 0.9rem;
-            border-bottom: 1px solid rgba(94, 112, 145, 0.25);
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 0.75rem;
+            margin-top: 1.1rem;
         }
         .buff-ref {
             color: var(--soft) !important;
+            background: rgba(8, 13, 22, 0.32);
+            border: 1px solid rgba(126, 146, 184, 0.22);
+            border-radius: 8px;
+            padding: 0.78rem 0.85rem;
         }
         .buff-ref strong {
             color: #ffb23f !important;
-            font-size: 1.9rem;
-            margin-left: 0.45rem;
+            display: block;
+            font-size: 1.45rem;
+            margin: 0.15rem 0 0;
+            line-height: 1.15;
         }
         .buff-panel {
-            background: linear-gradient(180deg, rgba(21, 27, 37, 0.95) 0%, rgba(24, 30, 40, 0.95) 100%);
+            background: linear-gradient(180deg, rgba(21, 27, 37, 0.94) 0%, rgba(18, 25, 35, 0.94) 100%);
             border: 1px solid rgba(95, 111, 142, 0.35);
-            border-radius: 22px;
+            border-radius: 8px;
             padding: 1rem 1rem 0.6rem 1rem;
             box-shadow: 0 18px 40px rgba(0, 0, 0, 0.2);
         }
@@ -394,7 +412,7 @@ def inject_styles() -> None:
         div[data-testid="stMetric"] {
             background: linear-gradient(180deg, rgba(26, 34, 48, 0.95) 0%, rgba(18, 24, 34, 0.95) 100%);
             border: 1px solid rgba(95, 111, 142, 0.35);
-            border-radius: 18px;
+            border-radius: 8px;
             padding: 0.85rem 0.9rem;
         }
         div[data-testid="stMetricLabel"] {
@@ -410,7 +428,7 @@ def inject_styles() -> None:
         div[data-baseweb="select"] > div {
             background: rgba(19, 25, 35, 0.92) !important;
             border: 1px solid rgba(95, 111, 142, 0.35) !important;
-            border-radius: 14px !important;
+            border-radius: 8px !important;
         }
         input, textarea {
             color: var(--text) !important;
@@ -426,7 +444,7 @@ def inject_styles() -> None:
             background: rgba(79, 111, 182, 0.12);
             border: 1px solid rgba(91, 122, 191, 0.32);
             padding: 0.55rem 0.85rem;
-            border-radius: 12px;
+            border-radius: 8px;
         }
         div[role="radiogroup"] label p {
             color: var(--soft) !important;
@@ -450,11 +468,18 @@ def inject_styles() -> None:
             .buff-grid {
                 grid-template-columns: 1fr;
             }
+            .buff-statline {
+                grid-template-columns: 1fr;
+            }
             .buff-image-card {
                 min-height: 240px;
             }
             .buff-knife-art {
                 height: 220px;
+            }
+            .buff-nav {
+                align-items: flex-start;
+                flex-direction: column;
             }
         }
         </style>
@@ -511,13 +536,13 @@ if history_df.empty:
     raise SystemExit(0)
 
 st.markdown(
-    """
+    f"""
     <div class="buff-nav">
       <div class="buff-brand">
         <div class="buff-badge">B</div>
         <div>CS2 Skin Market</div>
       </div>
-      <div style="color:#aab6ca;">Knife market prices, images, and history.</div>
+      <div class="buff-nav-subtitle">Live BUFF listings {'enabled' if os.getenv('BUFF_COOKIE') else 'waiting for cookie'} · Auto refresh every {max(30, REFRESH_SECONDS) // 60} min</div>
     </div>
     """,
     unsafe_allow_html=True,
