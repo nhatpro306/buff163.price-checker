@@ -57,6 +57,7 @@ def fallback_history_frame() -> pd.DataFrame:
                 "Reference Price": snapshot.reference_price,
                 "Image URL": snapshot.image_url,
                 "Observed Orders": snapshot.observed_orders,
+                "Source": "Fallback",
             }
             for snapshot in snapshots
         ]
@@ -72,7 +73,13 @@ def merge_fallback_history(history: pd.DataFrame) -> pd.DataFrame:
         return history
     if history.empty:
         return fallback
-    return pd.concat([history, fallback], ignore_index=True)
+    fallback = fallback.copy()
+    history = history.copy()
+    fallback["_Fallback Current"] = 1
+    history["_Fallback Current"] = 0
+    merged = pd.concat([history, fallback], ignore_index=True)
+    merged["Timestamp"] = pd.to_datetime(merged["Timestamp"], errors="coerce", utc=True)
+    return merged.sort_values(["Timestamp", "_Fallback Current"]).drop(columns=["_Fallback Current"])
 
 
 def base_knife_type(value: object) -> str:
@@ -518,6 +525,8 @@ family_df = history_df[history_df["Family"] == family_selected].copy()
 
 condition_latest = (
     family_df.sort_values("Timestamp")
+    .assign(_source_key=lambda frame: frame.get("Source", pd.Series("", index=frame.index)).eq("Fallback").astype(int))
+    .sort_values(["Timestamp", "_source_key"])
     .groupby("Condition", as_index=False)
     .tail(1)
     .assign(_sort_key=lambda frame: frame["Condition"].map(lambda value: CONDITION_ORDER.get(str(value), 50)))
@@ -534,7 +543,12 @@ selected_condition_label = st.radio(
 )
 condition_selected = condition_map[selected_condition_label]
 
-variant_df = family_df[family_df["Condition"] == condition_selected].copy().sort_values("Timestamp")
+variant_df = (
+    family_df[family_df["Condition"] == condition_selected]
+    .copy()
+    .assign(_source_key=lambda frame: frame.get("Source", pd.Series("", index=frame.index)).eq("Fallback").astype(int))
+    .sort_values(["Timestamp", "_source_key"])
+)
 latest = variant_df.iloc[-1]
 image_url = choose_image_url(variant_df)
 reference_price = float(latest["Reference Price"]) if pd.notna(latest["Reference Price"]) else float(latest["Price"])
