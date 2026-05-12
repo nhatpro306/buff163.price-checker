@@ -11,9 +11,11 @@ from streamlit_autorefresh import st_autorefresh
 from main import (
     ALL_CATALOG_HEADERS,
     ALL_CATALOG_SHEET_NAME,
+    BuffPriceClient,
     CATALOG_HEADERS,
     CATALOG_SHEET_NAME,
     CONDITION_ORDER,
+    DEFAULT_KNIFE_CATEGORIES,
     FORECAST_SHEET_NAME,
     DEFAULT_TRACK_KEYWORDS,
     csgotrader_snapshots,
@@ -116,6 +118,32 @@ def knife_tile_image(frame: pd.DataFrame) -> str:
         if image_url:
             return image_url
     return choose_image_url(frame.sort_values("Timestamp"))
+
+
+@st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
+def live_buff_listing(family: str, condition: str, knife_type: str) -> dict[str, object]:
+    if not os.getenv("BUFF_COOKIE"):
+        return {}
+    category = DEFAULT_KNIFE_CATEGORIES.get(base_knife_type(knife_type))
+    try:
+        snapshots = BuffPriceClient(timeout=15).discover_snapshots_from_market(
+            keyword=family,
+            category=category,
+            min_price=0,
+            max_pages=1,
+        )
+    except Exception:
+        return {}
+    for snapshot in snapshots:
+        if snapshot.family == family and snapshot.condition == condition:
+            return {
+                "goods_id": snapshot.goods_id,
+                "listings": snapshot.listings,
+                "buy_orders": snapshot.buy_orders,
+                "reference_price": snapshot.reference_price,
+                "image_url": snapshot.image_url,
+            }
+    return {}
 
 
 @st.cache_resource(show_spinner=False)
@@ -568,8 +596,18 @@ image_url = choose_image_url(variant_df)
 reference_price = float(latest["Reference Price"]) if pd.notna(latest["Reference Price"]) else float(latest["Price"])
 buy_orders = int(latest["Buy Orders"]) if pd.notna(latest["Buy Orders"]) else 0
 sell_stock = int(latest["Listings"]) if pd.notna(latest["Listings"]) else 0
-listing_source = "BUFF" if sell_stock > 0 else "BUFF unavailable"
 knife_category = family_selected.split("|")[0].strip()
+goods_id = str(latest.get("Goods ID") or "N/A")
+if os.getenv("BUFF_APP_LIVE_LISTINGS", "1").strip().lower() in {"1", "true", "yes", "on"}:
+    live_listing = live_buff_listing(family_selected, condition_selected, knife_category)
+    if live_listing:
+        sell_stock = int(live_listing.get("listings") or 0)
+        buy_orders = int(live_listing.get("buy_orders") or 0)
+        goods_id = str(live_listing.get("goods_id") or goods_id)
+        if live_listing.get("reference_price") is not None:
+            reference_price = float(live_listing["reference_price"])
+        image_url = str(live_listing.get("image_url") or image_url)
+listing_source = "BUFF" if sell_stock > 0 else "BUFF unavailable"
 
 st.markdown(
     f"""
@@ -584,7 +622,7 @@ st.markdown(
           <div class="buff-submeta">
             <span>Quality | {condition_selected}</span>
             <span>Category | {knife_category}</span>
-            <span>Goods ID | {str(latest.get('Goods ID') or 'N/A')}</span>
+            <span>Goods ID | {goods_id}</span>
           </div>
           <div class="buff-statline">
             <div class="buff-ref">Reference price <strong>{reference_price:,.2f} CNY</strong></div>
