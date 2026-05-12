@@ -123,7 +123,7 @@ def knife_tile_image(frame: pd.DataFrame) -> str:
 @st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
 def live_buff_listing(family: str, condition: str, knife_type: str) -> dict[str, object]:
     if not os.getenv("BUFF_COOKIE"):
-        return {}
+        return {"status": "cookie missing", "checked_at": pd.Timestamp.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")}
     category = DEFAULT_KNIFE_CATEGORIES.get(base_knife_type(knife_type))
     try:
         client = BuffPriceClient(timeout=15)
@@ -136,18 +136,26 @@ def live_buff_listing(family: str, condition: str, knife_type: str) -> dict[str,
                 min_price=0,
                 max_pages=1,
             )
-    except Exception:
-        return {}
+    except Exception as exc:
+        return {
+            "status": f"error: {exc.__class__.__name__}",
+            "checked_at": pd.Timestamp.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+        }
     for snapshot in snapshots:
         if snapshot.family == family and snapshot.condition == condition:
             return {
+                "status": "live",
+                "checked_at": pd.Timestamp.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
                 "goods_id": snapshot.goods_id,
                 "listings": snapshot.listings,
                 "buy_orders": snapshot.buy_orders,
                 "reference_price": snapshot.reference_price,
                 "image_url": snapshot.image_url,
             }
-    return {}
+    return {
+        "status": "no matching listing",
+        "checked_at": pd.Timestamp.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+    }
 
 
 @st.cache_resource(show_spinner=False)
@@ -627,9 +635,10 @@ buy_orders = int(latest["Buy Orders"]) if pd.notna(latest["Buy Orders"]) else 0
 sell_stock = int(latest["Listings"]) if pd.notna(latest["Listings"]) else 0
 knife_category = family_selected.split("|")[0].strip()
 goods_id = str(latest.get("Goods ID") or "N/A")
+live_listing: dict[str, object] = {}
 if os.getenv("BUFF_APP_LIVE_LISTINGS", "1").strip().lower() in {"1", "true", "yes", "on"}:
     live_listing = live_buff_listing(family_selected, condition_selected, knife_category)
-    if live_listing:
+    if live_listing.get("status") == "live":
         sell_stock = int(live_listing.get("listings") or 0)
         buy_orders = int(live_listing.get("buy_orders") or 0)
         goods_id = str(live_listing.get("goods_id") or goods_id)
@@ -670,8 +679,14 @@ metric_cols[0].metric("Lowest Sell", f"{float(latest['Price']):,.2f} CNY")
 metric_cols[1].metric("Listings", sell_stock if sell_stock else "N/A", help=f"Source: {listing_source}")
 metric_cols[2].metric("Buy Orders", buy_orders)
 metric_cols[3].metric("Last Update", latest["Timestamp"].strftime("%Y-%m-%d"))
-if listing_source == "BUFF unavailable":
-    st.caption("Live BUFF listings are unavailable for this selected skin. Check `BUFF_COOKIE`, then wait for cache refresh or run the tracker.")
+live_status = str(live_listing.get("status") or ("disabled" if not os.getenv("BUFF_APP_LIVE_LISTINGS", "1").strip().lower() in {"1", "true", "yes", "on"} else "not checked"))
+live_checked = str(live_listing.get("checked_at") or "N/A")
+status_cols = st.columns((1.2, 1.2, 2.6))
+status_cols[0].caption(f"Live listing: {live_status}")
+status_cols[1].caption(f"Checked: {live_checked}")
+status_cols[2].caption(
+    "Set `BUFF_COOKIE` in Streamlit/GitHub secrets." if live_status == "cookie missing" else f"Cache TTL: {CACHE_TTL_SECONDS}s"
+)
 
 daily_df = variant_df.copy()
 if "Listings" in daily_df.columns:
