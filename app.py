@@ -75,6 +75,20 @@ def merge_fallback_history(history: pd.DataFrame) -> pd.DataFrame:
         return fallback
     fallback = fallback.copy()
     history = history.copy()
+    if {"Family", "Condition", "Listings", "Buy Orders"}.issubset(history.columns):
+        hist_stats = (
+            history.assign(Timestamp=pd.to_datetime(history.get("Timestamp"), errors="coerce", utc=True))
+            .sort_values("Timestamp")
+            .groupby(["Family", "Condition"], as_index=False)
+            .tail(1)[["Family", "Condition", "Listings", "Buy Orders"]]
+            .rename(columns={"Listings": "_Hist Listings", "Buy Orders": "_Hist Buy Orders"})
+        )
+        fallback = fallback.merge(hist_stats, on=["Family", "Condition"], how="left")
+        fallback["Listings"] = fallback["Listings"].where(fallback["Listings"].fillna(0) > 0, fallback["_Hist Listings"])
+        fallback["Buy Orders"] = fallback["Buy Orders"].where(
+            fallback["Buy Orders"].fillna(0) > 0, fallback["_Hist Buy Orders"]
+        )
+        fallback = fallback.drop(columns=["_Hist Listings", "_Hist Buy Orders"])
     fallback["_Fallback Current"] = 1
     history["_Fallback Current"] = 0
     merged = pd.concat([history, fallback], ignore_index=True)
