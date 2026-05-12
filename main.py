@@ -1385,8 +1385,6 @@ def get_search_keywords(track_keywords: list[str]) -> list[str | tuple[str, str 
 
 
 def csgotrader_snapshots(track_keywords: list[str], min_price_cny: float) -> list[MarketSnapshot]:
-    if env_flag("BUFF_LISTINGS_ONLY_DIRECT", True):
-        return []
     usd_to_cny = float(os.getenv("BUFF_USD_CNY", "7.2"))
     response = requests.get(CSGOTRADER_BUFF_URL, timeout=30)
     response.raise_for_status()

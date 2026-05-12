@@ -16,6 +16,7 @@ from main import (
     CONDITION_ORDER,
     FORECAST_SHEET_NAME,
     DEFAULT_TRACK_KEYWORDS,
+    csgotrader_snapshots,
     SHEET_NAME,
     SheetStore,
     load_history_frame,
@@ -36,6 +37,30 @@ st.set_page_config(page_title="CS2 Skin Market", layout="wide")
 
 TRACK_KEYWORDS = tuple(DEFAULT_TRACK_KEYWORDS)
 HIGH_VALUE_MIN_PRICE = float(os.getenv("BUFF_MIN_PRICE_CNY", "0"))
+
+
+def fallback_history_frame() -> pd.DataFrame:
+    timestamp = pd.Timestamp.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    snapshots = csgotrader_snapshots(list(TRACK_KEYWORDS), HIGH_VALUE_MIN_PRICE)
+    return pd.DataFrame(
+        [
+            {
+                "Timestamp": timestamp,
+                "Goods ID": snapshot.goods_id,
+                "Family": snapshot.family,
+                "Knife Type": snapshot.knife_type,
+                "Skin Name": snapshot.skin_name,
+                "Condition": snapshot.condition,
+                "Price": snapshot.price,
+                "Listings": snapshot.listings,
+                "Buy Orders": snapshot.buy_orders,
+                "Reference Price": snapshot.reference_price,
+                "Image URL": snapshot.image_url,
+                "Observed Orders": snapshot.observed_orders,
+            }
+            for snapshot in snapshots
+        ]
+    )
 
 
 def base_knife_type(value: object) -> str:
@@ -393,16 +418,19 @@ history_df, catalog_df, all_catalog_df, forecast_df, startup_error = load_app_fr
 )
 
 if startup_error is not None:
-    st.error("Cannot load data source. Check Google Sheet credentials or enable SQLite mode.")
-    st.code(str(startup_error))
-    st.info("Set `GSHEET_CREDS_JSON`/`credentials.json`, or set `BUFF_READ_SQLITE=1` with `BUFF_SQLITE_PATH`.")
-    st.stop()
-    raise SystemExit(0)
+    try:
+        history_df = fallback_history_frame()
+        startup_error = None
+    except Exception as fallback_error:
+        st.error("Cannot load data source. Check Google Sheet credentials or enable SQLite mode.")
+        st.code(str(startup_error))
+        st.info("Set `GSHEET_CREDS_JSON`/`credentials.json`, or set `BUFF_READ_SQLITE=1` with `BUFF_SQLITE_PATH`.")
+        st.code(f"Fallback failed: {fallback_error}")
+        st.stop()
+        raise SystemExit(0)
 
 if history_df.empty:
-    st.warning("No knife history exists yet. Run `python main.py` first.")
-    st.stop()
-    raise SystemExit(0)
+    history_df = fallback_history_frame()
 
 required_cols = {"Timestamp", "Price", "Listings", "Family", "Skin Name", "Condition"}
 if not required_cols.issubset(set(history_df.columns)):
