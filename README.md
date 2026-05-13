@@ -11,7 +11,7 @@ The project has two main entry points:
 
 Check the Streamlit app here after deployment:
 
-[Open BUFF163 Price Checker](https://your-streamlit-app-url.streamlit.app)
+[Open BUFF163 Price Checker](https://buff163price-checker.streamlit.app/)
 
 ## Features
 
