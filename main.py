@@ -872,11 +872,8 @@ def resolve_credentials_path() -> Path:
 
     candidates = [
         Path("credentials.json"),
-        Path("credentials.json.bak"),
         Path(__file__).resolve().parent / "credentials.json",
-        Path(__file__).resolve().parent / "credentials.json.bak",
         Path(__file__).resolve().parent.parent / "credentials.json",
-        Path(__file__).resolve().parent.parent / "credentials.json.bak",
     ]
     for candidate in candidates:
         if candidate.exists():

@@ -180,3 +180,5 @@ node_modules/
 coverage/
 logs/
 .tmp/
+credentials.json
+credentials.json.bak
