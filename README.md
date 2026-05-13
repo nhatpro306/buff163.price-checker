@@ -7,6 +7,12 @@ The project has two main entry points:
 - `main.py` collects market data, writes history, rebuilds catalog sheets, generates signals, and optionally creates forecasts.
 - `app.py` runs the Streamlit dashboard for browsing knife prices, listings, buy orders, history charts, condition catalogs, forecasts, and full catalog data.
 
+## Live Demo
+
+Check the Streamlit app here after deployment:
+
+[Open BUFF163 Price Checker](https://your-streamlit-app-url.streamlit.app)
+
 ## Features
 
 - Tracks CS2 knife market prices from BUFF163.
