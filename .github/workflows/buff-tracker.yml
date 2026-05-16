@@ -2,9 +2,8 @@ name: Run Buff Knife Tracker
 
 on:
   schedule:
-    - cron: '0 23 * * *'    # 08:00 JST
+    - cron: '0 15 * * *'    # 00:00 JST
     - cron: '0 3 * * *'     # 12:00 JST
-    - cron: '0 7 * * *'     # 16:00 JST
   workflow_dispatch:        # Allows manual run via GitHub UI
 
 jobs:
