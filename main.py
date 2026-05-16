@@ -1517,6 +1517,12 @@ def run(migrate_only: bool = False) -> None:
         )
     if env_flag("BUFF_FALLBACK_CSGOTRADER", False):
         fallback_snapshots = csgotrader_snapshots(track_keywords, min_price)
+        min_fallback_snapshots = int(os.getenv("BUFF_MIN_FALLBACK_SNAPSHOTS", "0") or "0")
+        if min_fallback_snapshots and len(fallback_snapshots) < min_fallback_snapshots:
+            raise RuntimeError(
+                "Fallback source returned too few tracked snapshots: "
+                f"{len(fallback_snapshots)} < {min_fallback_snapshots}."
+            )
         direct_count = len(snapshots)
         snapshots = merge_direct_and_fallback_snapshots(snapshots, fallback_snapshots)
         print(

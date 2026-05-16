@@ -24,6 +24,7 @@ jobs:
       BUFF_FULL_CATALOG_PAGES: "12"
       BUFF_RUN_MIGRATION: "0"
       BUFF_FALLBACK_CSGOTRADER: "1"
+      BUFF_MIN_FALLBACK_SNAPSHOTS: "3000"
       BUFF_ENABLE_FORECAST: "0"
       BUFF_LISTINGS_ONLY_DIRECT: "1"
 
@@ -40,6 +41,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+
+      - name: Run tests
+        run: |
+          python -m unittest tests.test_snapshot_merge
 
       - name: Run the Buff tracker
         run: |
