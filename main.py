@@ -1499,10 +1499,16 @@ def run(migrate_only: bool = False) -> None:
         )
     if env_flag("BUFF_FALLBACK_CSGOTRADER", False):
         fallback_snapshots = csgotrader_snapshots(track_keywords, min_price)
-        snapshots_by_id = {snapshot.goods_id: snapshot for snapshot in snapshots}
-        snapshots_by_id.update({snapshot.goods_id: snapshot for snapshot in fallback_snapshots})
+        snapshots_by_market_key = {
+            (snapshot.family, snapshot.condition): snapshot
+            for snapshot in snapshots
+        }
+        for snapshot in fallback_snapshots:
+            # Fallback fills missing price rows only. Direct BUFF snapshots keep
+            # richer live listing/buy-order data when both sources find a skin.
+            snapshots_by_market_key.setdefault((snapshot.family, snapshot.condition), snapshot)
         snapshots = sorted(
-            snapshots_by_id.values(),
+            snapshots_by_market_key.values(),
             key=lambda item: (item.family, CONDITION_ORDER.get(item.condition, 50), item.goods_id),
         )
         if enable_sqlite and sqlite_path and not write_sheets:
