@@ -1442,6 +1442,24 @@ def csgotrader_snapshots(track_keywords: list[str], min_price_cny: float) -> lis
     return sorted(snapshots, key=lambda item: (item.family, CONDITION_ORDER.get(item.condition, 50), item.goods_id))
 
 
+def merge_direct_and_fallback_snapshots(
+    direct_snapshots: list[MarketSnapshot],
+    fallback_snapshots: list[MarketSnapshot],
+) -> list[MarketSnapshot]:
+    snapshots_by_market_key = {
+        (snapshot.family, snapshot.condition): snapshot
+        for snapshot in direct_snapshots
+    }
+    for snapshot in fallback_snapshots:
+        # Fallback fills missing price rows only. Direct BUFF snapshots keep
+        # richer live listing/buy-order data when both sources find a skin.
+        snapshots_by_market_key.setdefault((snapshot.family, snapshot.condition), snapshot)
+    return sorted(
+        snapshots_by_market_key.values(),
+        key=lambda item: (item.family, CONDITION_ORDER.get(item.condition, 50), item.goods_id),
+    )
+
+
 def run(migrate_only: bool = False) -> None:
     sqlite_path = os.getenv("BUFF_SQLITE_PATH", DEFAULT_SQLITE_PATH).strip()
     enable_sqlite = env_flag("BUFF_WRITE_SQLITE", False)
@@ -1499,11 +1517,11 @@ def run(migrate_only: bool = False) -> None:
         )
     if env_flag("BUFF_FALLBACK_CSGOTRADER", False):
         fallback_snapshots = csgotrader_snapshots(track_keywords, min_price)
-        snapshots_by_id = {snapshot.goods_id: snapshot for snapshot in snapshots}
-        snapshots_by_id.update({snapshot.goods_id: snapshot for snapshot in fallback_snapshots})
-        snapshots = sorted(
-            snapshots_by_id.values(),
-            key=lambda item: (item.family, CONDITION_ORDER.get(item.condition, 50), item.goods_id),
+        direct_count = len(snapshots)
+        snapshots = merge_direct_and_fallback_snapshots(snapshots, fallback_snapshots)
+        print(
+            f"Fallback merge: direct={direct_count}, "
+            f"fallback={len(fallback_snapshots)}, final={len(snapshots)}."
         )
         if enable_sqlite and sqlite_path and not write_sheets:
             sqlite_write_snapshots(sqlite_path, fallback_snapshots, timestamp)
