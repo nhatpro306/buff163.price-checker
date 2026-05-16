@@ -191,6 +191,8 @@ class BuffPriceClient:
         self.timeout = timeout
         self.session = requests.Session()
         self.page_cache: dict[str, dict[str, Any]] = {}
+        # BUFF occasionally has transient server errors. Retry only safe GET
+        # requests so a temporary failure does not make the scheduled job fail.
         retry = Retry(
             total=2,
             backoff_factor=0.7,
@@ -212,6 +214,8 @@ class BuffPriceClient:
         )
         cookie = os.getenv("BUFF_COOKIE")
         if cookie:
+            # Some BUFF endpoints return richer or more reliable data with a
+            # logged-in browser cookie. Store it in GitHub/Streamlit secrets.
             self.session.headers["Cookie"] = cookie
             parsed_cookie = SimpleCookie()
             try:
@@ -228,6 +232,8 @@ class BuffPriceClient:
             response = self.session.get(url, timeout=self.timeout, **kwargs)
             if response.status_code != 429:
                 return response
+            # 429 means rate-limited. Back off instead of retrying immediately,
+            # otherwise BUFF is more likely to keep blocking the workflow.
             backoff_seconds = min(2.0 + attempt * 1.5, 8.0)
             time.sleep(backoff_seconds)
         return response
@@ -870,6 +876,8 @@ def resolve_credentials_path() -> Path:
     if env_path and Path(env_path).exists():
         return Path(env_path)
 
+    # Local fallback for development only. Production should use secret JSON
+    # env vars such as GSHEET_CREDS_JSON, not committed credential files.
     candidates = [
         Path("credentials.json"),
         Path(__file__).resolve().parent / "credentials.json",
@@ -900,11 +908,15 @@ def load_google_credentials(scope: list[str]) -> service_account.Credentials:
     for key in env_json_keys:
         raw_json = os.getenv(key)
         if raw_json:
+            # GitHub Actions and most hosts work best with the whole service
+            # account JSON stored as one secret environment variable.
             return credentials_from_info(json.loads(raw_json), scope)
 
     try:
         import streamlit as st
 
+        # Streamlit Cloud stores secrets separately from normal environment
+        # variables, so the dashboard supports both deployment styles.
         for key in ("GSHEET_CREDS_JSON", "GSHEET_CREDS", "GOOGLE_CREDENTIALS_JSON"):
             if key in st.secrets:
                 return credentials_from_info(json.loads(str(st.secrets[key])), scope)
@@ -1446,6 +1458,12 @@ def merge_direct_and_fallback_snapshots(
     direct_snapshots: list[MarketSnapshot],
     fallback_snapshots: list[MarketSnapshot],
 ) -> list[MarketSnapshot]:
+    """Merge direct BUFF rows with broad fallback price coverage.
+
+    Direct BUFF rows are preferred because they include live listings and buy
+    orders. Fallback rows fill price gaps for knives that the direct scan did
+    not find during that scheduled run.
+    """
     snapshots_by_market_key = {
         (snapshot.family, snapshot.condition): snapshot
         for snapshot in direct_snapshots
@@ -1519,6 +1537,8 @@ def run(migrate_only: bool = False) -> None:
         fallback_snapshots = csgotrader_snapshots(track_keywords, min_price)
         min_fallback_snapshots = int(os.getenv("BUFF_MIN_FALLBACK_SNAPSHOTS", "0") or "0")
         if min_fallback_snapshots and len(fallback_snapshots) < min_fallback_snapshots:
+            # A tiny fallback result would silently create missing price days.
+            # Failing the workflow is safer because GitHub Actions will show it.
             raise RuntimeError(
                 "Fallback source returned too few tracked snapshots: "
                 f"{len(fallback_snapshots)} < {min_fallback_snapshots}."

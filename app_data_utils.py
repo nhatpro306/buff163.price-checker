@@ -19,6 +19,7 @@ def load_app_frames(
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, Exception | None]:
     try:
         if use_sqlite and sqlite_path:
+            # SQLite mode is for local testing without Google Sheets credentials.
             history_df = load_sqlite_history(sqlite_path)
             return history_df, pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), None
 
@@ -34,6 +35,8 @@ def load_app_frames(
 
 def prepare_history_frame(history_df: pd.DataFrame) -> pd.DataFrame:
     frame = history_df.copy()
+    # Normalize spreadsheet values before filtering/charting. Google Sheets can
+    # return numbers as strings, especially after manual edits.
     frame["Timestamp"] = pd.to_datetime(frame["Timestamp"], errors="coerce", utc=True)
     frame["Price"] = pd.to_numeric(frame["Price"], errors="coerce")
     frame["Listings"] = pd.to_numeric(frame["Listings"], errors="coerce")
