@@ -1,6 +1,7 @@
 import unittest
 
-from main import MarketSnapshot, merge_direct_and_fallback_snapshots
+from market_models import MarketSnapshot
+from main import merge_direct_and_fallback_snapshots
 
 
 def snapshot(

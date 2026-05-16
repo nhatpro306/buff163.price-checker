@@ -42,10 +42,15 @@ Check the Streamlit app here after deployment:
 .
 |-- app.py                  # Streamlit dashboard
 |-- app_data_utils.py       # Data loading and cleaning helpers for the app
-|-- main.py                 # Price tracker, storage, analysis, and forecast logic
+|-- main.py                 # Tracker orchestration, sheet writes, analysis, and CLI entrypoint
+|-- market_config.py        # Shared constants, sheet names, headers, and default knife lists
+|-- market_models.py        # Shared dataclasses such as MarketSnapshot
+|-- market_utils.py         # Parsing, env flag, ID, JSON cache, and image helper functions
 |-- requirements.txt        # Python dependencies
 |-- runtime.txt             # Python runtime for hosting platforms
 |-- render.yaml             # Render deployment config
+|-- tests/
+|   `-- test_snapshot_merge.py
 `-- .github/workflows/
     `-- buff-tracker.yml    # Scheduled GitHub Actions tracker run
 ```

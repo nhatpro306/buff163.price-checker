@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
-import html
 import json
 import math
 import os
@@ -10,7 +8,6 @@ import re
 import sqlite3
 import time
 from http.cookies import SimpleCookie
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from statistics import mean, pstdev
@@ -23,161 +20,39 @@ from google.oauth2 import service_account
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-
-SHEET_NAME = os.getenv("BUFF_SHEET_NAME", "BuffKnifeTracker")
-LOG_SHEET_NAME = "HistoryLog"
-CATALOG_SHEET_NAME = "Catalog"
-ALL_CATALOG_SHEET_NAME = "AllCatalog"
-DASHBOARD_SHEET_NAME = "Dashboard"
-FORECAST_SHEET_NAME = "Forecast"
-SIGNALS_SHEET_NAME = "Signals"
-DEFAULT_BUTTERFLY_SEEDS = ["42552", "42555", "42533", "42587"]
-DEFAULT_KARAMBIT_SEEDS = ["42901", "42905", "42911", "42909"]
-DEFAULT_KNIFE_TYPES = [
-    "Bayonet",
-    "Bowie Knife",
-    "Butterfly Knife",
-    "Classic Knife",
-    "Falchion Knife",
-    "Flip Knife",
-    "Gut Knife",
-    "Huntsman Knife",
-    "Karambit",
-    "Kukri Knife",
-    "M9 Bayonet",
-    "Navaja Knife",
-    "Nomad Knife",
-    "Paracord Knife",
-    "Shadow Daggers",
-    "Skeleton Knife",
-    "Stiletto Knife",
-    "Survival Knife",
-    "Talon Knife",
-    "Ursus Knife",
-]
-DEFAULT_KNIFE_CATEGORIES = {
-    "Bayonet": "weapon_bayonet",
-    "Bowie Knife": "weapon_knife_survival_bowie",
-    "Butterfly Knife": "weapon_knife_butterfly",
-    "Classic Knife": "weapon_knife_css",
-    "Falchion Knife": "weapon_knife_falchion",
-    "Flip Knife": "weapon_knife_flip",
-    "Gut Knife": "weapon_knife_gut",
-    "Huntsman Knife": "weapon_knife_tactical",
-    "Karambit": "weapon_knife_karambit",
-    "Kukri Knife": "weapon_knife_kukri",
-    "M9 Bayonet": "weapon_knife_m9_bayonet",
-    "Navaja Knife": "weapon_knife_gypsy_jackknife",
-    "Nomad Knife": "weapon_knife_outdoor",
-    "Paracord Knife": "weapon_knife_cord",
-    "Shadow Daggers": "weapon_knife_push",
-    "Skeleton Knife": "weapon_knife_skeleton",
-    "Stiletto Knife": "weapon_knife_stiletto",
-    "Survival Knife": "weapon_knife_canis",
-    "Talon Knife": "weapon_knife_widowmaker",
-    "Ursus Knife": "weapon_knife_ursus",
-}
-DEFAULT_KNIFE_FINISHES = [
-    "Doppler",
-    "Gamma Doppler",
-    "Marble Fade",
-    "Fade",
-    "Tiger Tooth",
-    "Slaughter",
-    "Crimson Web",
-    "Case Hardened",
-    "Blue Steel",
-    "Damascus Steel",
-    "Autotronic",
-    "Lore",
-    "Black Laminate",
-    "Freehand",
-    "Bright Water",
-    "Ultraviolet",
-    "Stained",
-    "Vanilla",
-]
-DEFAULT_TRACK_KEYWORDS = DEFAULT_KNIFE_TYPES
-DEFAULT_SQLITE_PATH = "buff163.sqlite3"
-CSGOTRADER_BUFF_URL = "https://prices.csgotrader.app/latest/buff163.json"
-CSGO_API_SKINS_URL = "https://raw.githubusercontent.com/ByMykel/CSGO-API/main/public/api/en/skins.json"
-STEAM_IMAGE_CACHE_PATH = "steam_image_cache.json"
-
-HISTORY_HEADERS = [
-    "Timestamp",
-    "Goods ID",
-    "Family",
-    "Knife Type",
-    "Skin Name",
-    "Condition",
-    "Price",
-    "Listings",
-    "Buy Orders",
-    "Reference Price",
-    "Image URL",
-    "Observed Orders",
-]
-CATALOG_HEADERS = [
-    "Goods ID",
-    "Family",
-    "Skin Name",
-    "Condition",
-    "Price",
-    "Listings",
-    "Buy Orders",
-    "Reference Price",
-    "Image URL",
-]
-ALL_CATALOG_HEADERS = [
-    "Timestamp",
-    "Goods ID",
-    "Family",
-    "Skin Name",
-    "Condition",
-    "Price",
-    "Listings",
-    "Buy Orders",
-    "Reference Price",
-    "Image URL",
-    "Goods URL",
-]
-
-QUALITY_MAP = {
-    "崭新出厂": "Factory New",
-    "略有磨损": "Minimal Wear",
-    "久经沙场": "Field-Tested",
-    "破损不堪": "Well-Worn",
-    "战痕累累": "Battle-Scarred",
-    "★ StatTrak™": "StatTrak",
-    "StatTrak™": "StatTrak",
-}
-CONDITION_ORDER = {
-    "Factory New": 0,
-    "Minimal Wear": 1,
-    "Field-Tested": 2,
-    "Well-Worn": 3,
-    "Battle-Scarred": 4,
-    "StatTrak": 5,
-    "Unknown": 99,
-}
-
-
-@dataclass(frozen=True)
-class MarketSnapshot:
-    goods_id: str
-    family: str
-    skin_name: str
-    condition: str
-    price: float
-    listings: int
-    buy_orders: int
-    reference_price: float | None
-    image_url: str
-    observed_orders: int
-
-    @property
-    def knife_type(self) -> str:
-        return self.family.split("|")[0].replace("★", "").strip()
+from market_config import (
+    ALL_CATALOG_HEADERS,
+    ALL_CATALOG_SHEET_NAME,
+    CATALOG_HEADERS,
+    CATALOG_SHEET_NAME,
+    CONDITION_ORDER,
+    CSGOTRADER_BUFF_URL,
+    DASHBOARD_SHEET_NAME,
+    DEFAULT_KNIFE_CATEGORIES,
+    DEFAULT_KNIFE_FINISHES,
+    DEFAULT_SQLITE_PATH,
+    DEFAULT_TRACK_KEYWORDS,
+    FORECAST_SHEET_NAME,
+    HISTORY_HEADERS,
+    LOG_SHEET_NAME,
+    SHEET_NAME,
+    SIGNALS_SHEET_NAME,
+    STEAM_IMAGE_CACHE_PATH,
+)
+from market_models import MarketSnapshot
+from market_utils import (
+    canonicalize_family_name,
+    clean_html_text,
+    csgo_api_image_map,
+    env_flag,
+    load_json_file,
+    normalize_image_url,
+    save_json_file,
+    source_id,
+    split_market_name,
+    steam_image_url,
+    try_float,
+)
 
 
 class BuffPriceClient:
@@ -929,118 +804,6 @@ def load_google_credentials(scope: list[str]) -> service_account.Credentials:
         str(resolve_credentials_path()),
         scopes=scope,
     )
-
-
-def try_float(value: Any) -> float | None:
-    try:
-        if value in (None, ""):
-            return None
-        return float(str(value).replace(",", ""))
-    except Exception:
-        return None
-
-
-def normalize_image_url(value: Any) -> str:
-    url = str(value or "").strip()
-    if url.startswith("//"):
-        return f"https:{url}"
-    return url
-
-
-def source_id(prefix: str, value: str) -> str:
-    return f"{prefix}:{hashlib.sha1(value.encode('utf-8')).hexdigest()[:16]}"
-
-
-def load_json_file(path: str) -> dict[str, Any]:
-    try:
-        return json.loads(Path(path).read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-
-
-def save_json_file(path: str, data: dict[str, Any]) -> None:
-    Path(path).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def steam_image_url(market_hash_name: str, cache: dict[str, Any]) -> str:
-    if market_hash_name in cache:
-        return str(cache[market_hash_name] or "")
-    query = market_hash_name.strip()
-    if not query.startswith("★") and ("Knife" in query or "Karambit" in query or "Bayonet" in query):
-        query = f"★ {query}"
-    response = requests.get(
-        "https://steamcommunity.com/market/search/render/",
-        params={
-            "query": query,
-            "start": 0,
-            "count": 1,
-            "search_descriptions": 0,
-            "sort_column": "popular",
-            "sort_dir": "desc",
-            "appid": 730,
-            "norender": 1,
-        },
-        timeout=15,
-    )
-    response.raise_for_status()
-    results = response.json().get("results") or []
-    icon_url = (((results[0] if results else {}).get("asset_description") or {}).get("icon_url") or "").strip()
-    url = f"https://community.fastly.steamstatic.com/economy/image/{icon_url}" if icon_url else ""
-    cache[market_hash_name] = url
-    time.sleep(float(os.getenv("STEAM_IMAGE_DELAY", "0.25")))
-    return url
-
-
-def csgo_api_image_map() -> dict[str, str]:
-    response = requests.get(CSGO_API_SKINS_URL, timeout=30)
-    response.raise_for_status()
-    images: dict[str, str] = {}
-    for item in response.json():
-        name = str(item.get("name") or "").replace("★ ", "").strip()
-        image = str(item.get("image") or "").strip()
-        if not name or not image:
-            continue
-        images[name] = image
-        images[f"StatTrak™ {name}"] = image
-        for wear in item.get("wears") or []:
-            wear_name = str((wear or {}).get("name") or "").strip()
-            if wear_name:
-                images[f"{name} ({wear_name})"] = image
-                images[f"StatTrak™ {name} ({wear_name})"] = image
-    return images
-
-
-def env_flag(name: str, default: bool = False) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
-
-
-def split_market_name(name: str) -> tuple[str, str]:
-    cleaned = name.replace("★ ", "").strip()
-    match = re.match(r"(.+?) \((.+)\)$", cleaned)
-    if not match:
-        return cleaned, ""
-    return match.group(1).strip(), match.group(2).strip()
-
-
-def canonicalize_family_name(name: str) -> str:
-    value = (name or "").strip().replace("★ ", "")
-    if value.startswith("Butterfly | "):
-        return value.replace("Butterfly | ", "Butterfly Knife | ", 1)
-    if value.startswith("StatTrak™ Butterfly | "):
-        return value.replace("StatTrak™ Butterfly | ", "StatTrak™ Butterfly Knife | ", 1)
-    return value
-
-
-def clean_html_text(raw_html: str) -> str:
-    text = re.sub(r"<[^>]+>", " ", raw_html)
-    text = html.unescape(text)
-    text = re.sub(r"\s+", " ", text).strip()
-    for cn, en in QUALITY_MAP.items():
-        text = text.replace(cn, en)
-    return text
 
 
 def parse_family_and_condition(row: dict[str, Any]) -> tuple[str, str]:
