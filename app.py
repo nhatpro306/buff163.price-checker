@@ -8,18 +8,20 @@ import streamlit as st
 from gspread import WorksheetNotFound
 from streamlit_autorefresh import st_autorefresh
 
-from main import (
+from market_config import (
     ALL_CATALOG_HEADERS,
     ALL_CATALOG_SHEET_NAME,
-    BuffPriceClient,
     CATALOG_HEADERS,
     CATALOG_SHEET_NAME,
     CONDITION_ORDER,
     DEFAULT_KNIFE_CATEGORIES,
-    FORECAST_SHEET_NAME,
     DEFAULT_TRACK_KEYWORDS,
-    csgotrader_snapshots,
+    FORECAST_SHEET_NAME,
     SHEET_NAME,
+)
+from main import (
+    BuffPriceClient,
+    csgotrader_snapshots,
     SheetStore,
     load_history_frame,
     sqlite_load_history_frame,
@@ -517,6 +519,9 @@ history_df, catalog_df, all_catalog_df, forecast_df, startup_error = load_app_fr
 
 if startup_error is not None:
     try:
+        # Keep the public dashboard usable even if Google Sheets credentials are
+        # missing or temporarily unavailable. This fallback has prices but no
+        # live BUFF listing depth.
         history_df = fallback_history_frame()
         startup_error = None
     except Exception as fallback_error:
@@ -528,6 +533,8 @@ if startup_error is not None:
         raise SystemExit(0)
 
 if history_df.empty:
+    # Empty sheets can happen on first deploy. Show fallback data instead of an
+    # empty app so the UI remains testable before the first scheduled run.
     history_df = fallback_history_frame()
 
 history_df = merge_fallback_history(history_df)
@@ -639,6 +646,8 @@ live_listing: dict[str, object] = {}
 if os.getenv("BUFF_APP_LIVE_LISTINGS", "1").strip().lower() in {"1", "true", "yes", "on"}:
     live_listing = live_buff_listing(family_selected, condition_selected, knife_category)
     if live_listing.get("status") == "live":
+        # The sheet is historical; this optional live call refreshes the
+        # currently selected skin so listings/buy orders feel current in the UI.
         sell_stock = int(live_listing.get("listings") or 0)
         buy_orders = int(live_listing.get("buy_orders") or 0)
         goods_id = str(live_listing.get("goods_id") or goods_id)
