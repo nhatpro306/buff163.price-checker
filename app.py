@@ -19,13 +19,8 @@ from market_config import (
     FORECAST_SHEET_NAME,
     SHEET_NAME,
 )
-from main import (
-    BuffPriceClient,
-    csgotrader_snapshots,
-    SheetStore,
-    load_history_frame,
-    sqlite_load_history_frame,
-)
+from src.scraper import BuffPriceClient, csgotrader_snapshots
+from src.data_loader import SheetStore, load_history_frame, sqlite_load_history_frame
 from app_data_utils import (
     choose_image_url,
     filter_high_value_families,
