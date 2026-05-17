@@ -2,8 +2,8 @@ import unittest
 
 import pandas as pd
 
-from main import enrich_fallback_snapshots_with_latest_depth, merge_direct_and_fallback_snapshots
 from market_models import MarketSnapshot
+from main import enrich_fallback_snapshots_with_latest_depth, merge_direct_and_fallback_snapshots
 
 
 def snapshot(

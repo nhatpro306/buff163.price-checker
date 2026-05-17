@@ -6,5 +6,3 @@ gspread
 google-auth
 altair
 streamlit-autorefresh
-ruff
-black
