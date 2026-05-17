@@ -1,32 +1,22 @@
 # BUFF163 Price Checker
 
-A production-style Python + Streamlit project that tracks CS2 knife market prices from BUFF163, stores historical snapshots, and presents decision-ready analytics in a dashboard.
+A Python + Streamlit project for tracking CS2 knife prices from BUFF163, storing price history in Google Sheets or SQLite, and visualizing market movement in a dashboard.
 
-## Project Overview
+The project has two main entry points:
 
-`BUFF163 Price Checker` is an end-to-end data pipeline and analytics app:
-
-- Ingests market data from BUFF163 (with optional CSGOTrader fallback).
-- Normalizes and stores historical records in Google Sheets or SQLite.
-- Rebuilds analytics tables (catalog, dashboard, signals, optional forecast).
-- Serves an interactive Streamlit interface for monitoring trends and liquidity.
-
-This project is designed to demonstrate practical skills relevant to Data Analyst and Cloud Engineer roles: data ingestion, ETL reliability, scheduling, storage design, and reporting UI.
+- `main.py` collects market data, writes history, rebuilds catalog sheets, generates signals, and optionally creates forecasts.
+- `app.py` runs the Streamlit dashboard for browsing knife prices, listings, buy orders, history charts, condition catalogs, forecasts, and full catalog data.
 
 ## Features
 
-- Automated collection of CS2 knife prices, listings, and buy orders.
-- Dual storage mode: Google Sheets (cloud-first) or SQLite (local/offline).
-- Scheduled automation via GitHub Actions (twice daily + manual trigger).
-- Fallback source support when direct BUFF coverage is incomplete.
-- Listing-depth backfill from latest history for fallback-only rows.
-- Streamlit dashboard with:
-  - knife family and condition filtering
-  - price trend charts
-  - listings / buy-order indicators
-  - optional live listing refresh using BUFF cookie
-- Migration helpers for history schema evolution.
-- Lightweight unit tests for merge and fallback behavior.
+- Tracks CS2 knife market prices from BUFF163.
+- Stores historical snapshots in Google Sheets.
+- Supports local SQLite storage for offline or lightweight workflows.
+- Provides a Streamlit dashboard with price history, listing counts, condition filtering, and catalog tables.
+- Supports scheduled GitHub Actions runs.
+- Includes optional fallback data from CSGO Trader.
+- Supports optional forecast generation.
+- Can be deployed to Streamlit Cloud or Render.
 
 ## Tech Stack
 
@@ -36,7 +26,7 @@ This project is designed to demonstrate practical skills relevant to Data Analys
 - NumPy
 - Altair
 - Requests
-- Google Sheets API (`gspread`, `google-auth`)
+- Google Sheets API via `gspread`
 - SQLite
 - GitHub Actions
 
@@ -44,128 +34,206 @@ This project is designed to demonstrate practical skills relevant to Data Analys
 
 ```text
 .
-|-- app.py
-|-- main.py
-|-- app_data_utils.py
-|-- market_config.py
-|-- market_models.py
-|-- market_utils.py
-|-- src/
-|   |-- __init__.py
-|   |-- scraper.py       # scraper-related exports
-|   |-- data_loader.py   # storage and history loader exports
-|   |-- analysis.py      # analysis exports
-|   `-- alerts.py        # signal/alert exports
-|-- tests/
-|   `-- test_snapshot_merge.py
+|-- app.py                  # Streamlit dashboard
+|-- app_data_utils.py       # Data loading and cleaning helpers for the app
+|-- main.py                 # Price tracker, storage, analysis, and forecast logic
+|-- requirements.txt        # Python dependencies
+|-- runtime.txt             # Python runtime for hosting platforms
+|-- render.yaml             # Render deployment config
 `-- .github/workflows/
+    `-- buff-tracker.yml    # Scheduled GitHub Actions tracker run
 ```
 
-## Screenshots
+## Local Setup
 
-Add screenshots to visually strengthen your portfolio presentation:
-
-- `docs/screenshots/dashboard-overview.png` - main dashboard page
-- `docs/screenshots/family-condition-view.png` - family and condition drill-down
-- `docs/screenshots/history-trend-chart.png` - price trend visualization
-- `docs/screenshots/github-actions-run.png` - scheduled workflow execution
-
-Example markdown once images are added:
-
-```md
-![Dashboard Overview](docs/screenshots/dashboard-overview.png)
-![Condition Drill-Down](docs/screenshots/family-condition-view.png)
-![Trend Chart](docs/screenshots/history-trend-chart.png)
-![GitHub Actions Run](docs/screenshots/github-actions-run.png)
-```
-
-## Setup Instructions
-
-### 1. Clone repository
-
-```bash
-git clone https://github.com/nhatpro306/buff163.price-checker.git
-cd buff163.price-checker
-```
-
-### 2. Create virtual environment
-
-```bash
-python -m venv .venv
-```
-
-Windows PowerShell:
+Create and activate a virtual environment:
 
 ```powershell
+python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 ```
 
-macOS/Linux:
-
-```bash
-source .venv/bin/activate
-```
-
-### 3. Install dependencies
-
-```bash
-pip install --upgrade pip
-pip install -r requirements.txt
-```
-
-### 4. Configure credentials and environment
-
-Use one of these for Google Sheets access:
-
-- `GSHEET_CREDS_JSON` (recommended)
-- Streamlit secrets (`[gcp_service_account]`)
-- local `credentials.json` (never commit)
-
-Common environment variables:
-
-- `BUFF_SHEET_NAME` (default: `BuffKnifeTracker`)
-- `BUFF_COOKIE` (optional, for richer BUFF access/live listing)
-- `BUFF_WRITE_SQLITE` / `BUFF_READ_SQLITE`
-- `BUFF_SQLITE_PATH` (default: `buff163.sqlite3`)
-- `BUFF_FALLBACK_CSGOTRADER` (enable fallback source)
-
-## How to Run Locally
-
-### Run tracker pipeline
-
-```bash
-python main.py
-```
-
-### Run dashboard
-
-```bash
-streamlit run app.py
-```
-
-### Optional: SQLite-only local mode
-
-```bash
-# write snapshots to sqlite
-BUFF_WRITE_SQLITE=1
-BUFF_WRITE_SHEETS=0
-python main.py
-
-# read dashboard data from sqlite
-BUFF_READ_SQLITE=1
-streamlit run app.py
-```
-
-PowerShell equivalent:
+Install dependencies:
 
 ```powershell
-$env:BUFF_WRITE_SQLITE="1"
-$env:BUFF_WRITE_SHEETS="0"
-python main.py
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
 
-$env:BUFF_READ_SQLITE="1"
+Run the tracker:
+
+```powershell
+python main.py
+```
+
+Run the dashboard:
+
+```powershell
 streamlit run app.py
 ```
+
+## Google Sheets Setup
+
+The app supports three credential sources:
+
+1. `GSHEET_CREDS_JSON`
+
+   Full Google service account JSON stored as one environment variable.
+
+2. Streamlit secrets
+
+   Use either `GSHEET_CREDS_JSON` or a `[gcp_service_account]` secrets block.
+
+3. `credentials.json`
+
+   Local service account file in the repo root. This file is ignored by Git and should not be committed.
+
+Your Google service account must have access to the target spreadsheet.
+
+Default spreadsheet name:
+
+```text
+BuffKnifeTracker
+```
+
+You can override it with:
+
+```powershell
+$env:BUFF_SHEET_NAME = "YourSheetName"
+```
+
+## Common Environment Variables
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `BUFF_SHEET_NAME` | Google Sheet name | `BuffKnifeTracker` |
+| `GSHEET_CREDS_JSON` | Service account JSON string | none |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Path to local credential file | `credentials.json` fallback |
+| `BUFF_COOKIE` | Optional BUFF session cookie for authenticated requests | none |
+| `BUFF_MIN_PRICE_CNY` | Minimum price filter | `0` |
+| `BUFF_HIGH_VALUE_PAGES` | Number of BUFF market pages to scan | `25` in code, `2` in GitHub Actions |
+| `BUFF_FULL_CATALOG` | Enable full catalog scan | `false` |
+| `BUFF_FULL_CATALOG_PAGES` | Number of full catalog pages to scan | `60` in code, `12` in GitHub Actions |
+| `BUFF_ENABLE_FORECAST` | Enable forecast sheet generation | `false` in scheduled workflow |
+| `BUFF_WRITE_SQLITE` | Write snapshots to SQLite | `false` |
+| `BUFF_READ_SQLITE` | Read dashboard data from SQLite | `false` |
+| `BUFF_SQLITE_PATH` | SQLite database path | `buff163.sqlite3` |
+| `BUFF_UI_REFRESH_SEC` | Streamlit auto-refresh interval | `900` |
+| `BUFF_UI_CACHE_TTL_SEC` | Streamlit cache TTL | `300` |
+| `PAGE_META_CACHE_PATH` | Persistent page metadata cache path | `page_meta_cache.sqlite3` |
+| `ALERT_DISCORD_WEBHOOK` | Discord webhook URL for alerts | none |
+| `ALERT_TELEGRAM_TOKEN` | Telegram bot token for alerts | none |
+| `ALERT_TELEGRAM_CHAT_ID` | Telegram target chat/channel | none |
+
+## SQLite Mode
+
+SQLite is useful when you want to test locally without Google Sheets.
+
+Write tracker data to SQLite:
+
+```powershell
+$env:BUFF_WRITE_SQLITE = "1"
+$env:BUFF_WRITE_SHEETS = "0"
+$env:BUFF_SQLITE_PATH = "buff163.sqlite3"
+python main.py
+```
+
+Read dashboard data from SQLite:
+
+```powershell
+$env:BUFF_READ_SQLITE = "1"
+$env:BUFF_SQLITE_PATH = "buff163.sqlite3"
+streamlit run app.py
+```
+
+## GitHub Actions
+
+The workflow in `.github/workflows/buff-tracker.yml` runs twice per day:
+
+- `08:00 JST`
+- `18:00 JST`
+
+Required repository secrets:
+
+- `GSHEET_CREDS_JSON` recommended, full service-account JSON string
+- `GSHEET_CREDS` optional fallback for legacy setups
+- `BUFF_COOKIE` optional, useful if BUFF requires authenticated access
+
+Manual runs are also supported from the GitHub Actions tab through `workflow_dispatch`.
+
+## Streamlit Cloud Deployment
+
+Use `app.py` as the Streamlit entry point.
+
+Recommended Streamlit secrets:
+
+```toml
+BUFF_SHEET_NAME = "BuffKnifeTracker"
+
+[gcp_service_account]
+type = "service_account"
+project_id = "..."
+private_key_id = "..."
+private_key = "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+client_email = "..."
+client_id = "..."
+auth_uri = "https://accounts.google.com/o/oauth2/auth"
+token_uri = "https://oauth2.googleapis.com/token"
+auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
+client_x509_cert_url = "..."
+```
+
+## Render Deployment
+
+This repository includes `render.yaml`.
+
+Render uses:
+
+```text
+streamlit run app.py --server.address 0.0.0.0 --server.port $PORT
+```
+
+Set the same credentials and environment variables in the Render dashboard.
+
+## How The Data Flow Works
+
+```text
+BUFF163 / fallback source
+        |
+main.py tracker
+        |
+Google Sheets or SQLite
+        |
+app.py Streamlit dashboard
+        |
+Charts, tables, signals, and forecasts
+```
+
+## Learning Notes
+
+Important programming concepts used in this project:
+
+- API clients: `BuffPriceClient` wraps HTTP requests, retry behavior, headers, cookies, and parsing.
+- Data modeling: `MarketSnapshot` uses a dataclass to represent one clean market record.
+- ETL pipeline: data is extracted from APIs, transformed into normalized rows, and loaded into Sheets or SQLite.
+- Caching: Streamlit cache decorators reduce repeated network and Google Sheets calls.
+- Separation of concerns: `main.py` handles collection and analysis; `app.py` handles UI; `app_data_utils.py` handles reusable data preparation.
+- Time series basics: historical prices are grouped over time and can be used for simple forecasting.
+
+## Security Notes
+
+- Do not commit `credentials.json`, `credentials.json.bak`, cookies, or service account keys.
+- Store production secrets in GitHub Actions secrets, Streamlit secrets, or your hosting provider's environment settings.
+- If a credential file was ever committed publicly, rotate that service account key in Google Cloud.
+
+## Roadmap Ideas
+
+- Add automated tests for data cleaning and parsing.
+- Add a `.env.example` file for easier onboarding.
+- Add price alert notifications through Discord, email, or Telegram.
+- Add clearer error messages for missing Google Sheets permissions.
+- Add deployment screenshots to make the GitHub page more visual.
+
 
 ## Docker
 
@@ -175,47 +243,8 @@ Build image:
 docker build -t buff163-price-checker .
 ```
 
-Run container:
+Run dashboard:
 
 ```bash
-docker run --rm -p 8501:8501 buff163-price-checker
+docker run --rm -p 8501:8501 --env-file .env buff163-price-checker
 ```
-
-Open in browser:
-
-```text
-http://localhost:8501
-```
-
-If you need environment variables (for example `GSHEET_CREDS_JSON`, `BUFF_COOKIE`, or SQLite flags), pass them at runtime:
-
-```bash
-docker run --rm -p 8501:8501 \
-  -e GSHEET_CREDS_JSON='{"type":"service_account", ...}' \
-  -e BUFF_COOKIE='your_cookie_here' \
-  buff163-price-checker
-```
-
-## Business Value
-
-This project provides a practical market-intelligence workflow:
-
-- **Price monitoring**: tracks high-value knife price movement over time.
-- **Liquidity visibility**: monitors listings and buy-order pressure as supply/demand signals.
-- **Decision support**: summarizes trends for buy/sell watch decisions.
-- **Automation ROI**: replaces manual checks with scheduled, repeatable data collection.
-- **Operational resilience**: fallback data source and backfill logic reduce missing-day risk.
-
-For portfolio review, this demonstrates ownership of the full lifecycle: ingest -> transform -> store -> visualize -> automate.
-
-## Future Improvements
-
-- Expand tests to cover parsing, migration, and UI data-prep edge cases.
-- Add lint/type-check CI (`ruff`, `black`, `mypy`) for engineering quality.
-- Add alerting integrations (Discord/Email) for threshold-based events.
-- Add data-quality checks and anomaly detection on sudden price shifts.
-- Add architecture diagram and data dictionary in `/docs`.
-
-## Live Demo
-
-[Open Streamlit App](https://buff163price-checker.streamlit.app/)
