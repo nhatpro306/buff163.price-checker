@@ -13,7 +13,6 @@ import requests
 
 from market_config import CSGO_API_SKINS_URL
 
-
 QUALITY_MAP = {
     "崭新出厂": "Factory New",
     "略有磨损": "Minimal Wear",
@@ -60,25 +59,30 @@ def steam_image_url(market_hash_name: str, cache: dict[str, Any]) -> str:
     if market_hash_name in cache:
         return str(cache[market_hash_name] or "")
     query = market_hash_name.strip()
-    if not query.startswith("★") and ("Knife" in query or "Karambit" in query or "Bayonet" in query):
+    if not query.startswith("★") and (
+        "Knife" in query or "Karambit" in query or "Bayonet" in query
+    ):
         query = f"★ {query}"
+    params: dict[str, str | int] = {
+        "query": query,
+        "start": 0,
+        "count": 1,
+        "search_descriptions": 0,
+        "sort_column": "popular",
+        "sort_dir": "desc",
+        "appid": 730,
+        "norender": 1,
+    }
     response = requests.get(
         "https://steamcommunity.com/market/search/render/",
-        params={
-            "query": query,
-            "start": 0,
-            "count": 1,
-            "search_descriptions": 0,
-            "sort_column": "popular",
-            "sort_dir": "desc",
-            "appid": 730,
-            "norender": 1,
-        },
+        params=params,
         timeout=15,
     )
     response.raise_for_status()
     results = response.json().get("results") or []
-    icon_url = (((results[0] if results else {}).get("asset_description") or {}).get("icon_url") or "").strip()
+    icon_url = (
+        ((results[0] if results else {}).get("asset_description") or {}).get("icon_url") or ""
+    ).strip()
     url = f"https://community.fastly.steamstatic.com/economy/image/{icon_url}" if icon_url else ""
     cache[market_hash_name] = url
     time.sleep(float(os.getenv("STEAM_IMAGE_DELAY", "0.25")))

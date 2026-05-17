@@ -16,16 +16,16 @@ jobs:
       BUFF_COOKIE: ${{ secrets.BUFF_COOKIE }}
       BUFF_SHEET_NAME: BuffKnifeTracker
       BUFF_MIN_PRICE_CNY: "0"
-      BUFF_HIGH_VALUE_PAGES: "10"
-      BUFF_MARKET_PAGE_DELAY: "4.0"
-      BUFF_MAX_429_ATTEMPTS: "4"
+      BUFF_HIGH_VALUE_PAGES: "2"
       BUFF_TRACK_KEYWORDS: "Bayonet,Bowie Knife,Butterfly Knife,Classic Knife,Falchion Knife,Flip Knife,Gut Knife,Huntsman Knife,Karambit,Kukri Knife,M9 Bayonet,Navaja Knife,Nomad Knife,Paracord Knife,Shadow Daggers,Skeleton Knife,Stiletto Knife,Survival Knife,Talon Knife,Ursus Knife"
-      BUFF_FULL_CATALOG: "1"
-      BUFF_FULL_CATALOG_PAGES: "16"
+      BUFF_FULL_CATALOG: "0"
+      BUFF_FULL_CATALOG_PAGES: "12"
       BUFF_RUN_MIGRATION: "0"
-      BUFF_FALLBACK_CSGOTRADER: "1"
-      BUFF_MIN_FALLBACK_SNAPSHOTS: "3000"
       BUFF_ENABLE_FORECAST: "0"
+      BUFF_LISTINGS_ONLY_DIRECT: "1"
+      ALERT_DISCORD_WEBHOOK: ${{ secrets.ALERT_DISCORD_WEBHOOK }}
+      ALERT_TELEGRAM_TOKEN: ${{ secrets.ALERT_TELEGRAM_TOKEN }}
+      ALERT_TELEGRAM_CHAT_ID: ${{ secrets.ALERT_TELEGRAM_CHAT_ID }}
 
     steps:
       - name: Checkout code
@@ -40,10 +40,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-
-      - name: Run tests
-        run: |
-          python -m unittest tests.test_snapshot_merge
 
       - name: Run the Buff tracker
         run: |

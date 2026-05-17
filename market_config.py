@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 
-
 SHEET_NAME = os.getenv("BUFF_SHEET_NAME", "BuffKnifeTracker")
 LOG_SHEET_NAME = "HistoryLog"
 CATALOG_SHEET_NAME = "Catalog"
@@ -81,7 +80,9 @@ DEFAULT_TRACK_KEYWORDS = DEFAULT_KNIFE_TYPES
 DEFAULT_SQLITE_PATH = "buff163.sqlite3"
 
 CSGOTRADER_BUFF_URL = "https://prices.csgotrader.app/latest/buff163.json"
-CSGO_API_SKINS_URL = "https://raw.githubusercontent.com/ByMykel/CSGO-API/main/public/api/en/skins.json"
+CSGO_API_SKINS_URL = (
+    "https://raw.githubusercontent.com/ByMykel/CSGO-API/main/public/api/en/skins.json"
+)
 STEAM_IMAGE_CACHE_PATH = "steam_image_cache.json"
 
 HISTORY_HEADERS = [

@@ -2,8 +2,8 @@ import unittest
 
 import pandas as pd
 
-from market_models import MarketSnapshot
 from main import enrich_fallback_snapshots_with_latest_depth, merge_direct_and_fallback_snapshots
+from market_models import MarketSnapshot
 
 
 def snapshot(
@@ -46,7 +46,9 @@ class SnapshotMergeTests(unittest.TestCase):
         merged = merge_direct_and_fallback_snapshots([direct], [fallback])
 
         self.assertEqual(len(merged), 2)
-        self.assertEqual({item.family for item in merged}, {"Butterfly Knife | Fade", "Karambit | Doppler"})
+        self.assertEqual(
+            {item.family for item in merged}, {"Butterfly Knife | Fade", "Karambit | Doppler"}
+        )
 
     def test_fallback_depth_backfills_from_latest_history(self) -> None:
         fallback = snapshot("csgotrader:fade", "Butterfly Knife | Fade", "Factory New", 980, 0, 0)

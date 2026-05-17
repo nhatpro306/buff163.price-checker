@@ -6,3 +6,12 @@ gspread
 google-auth
 altair
 streamlit-autorefresh
+httpx
+
+# dev
+mypy>=1.9
+ruff>=0.4
+black>=24.4
+types-requests
+pytest
+pytest-cov

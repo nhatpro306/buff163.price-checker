@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Callable
+from collections.abc import Callable
 
 import pandas as pd
 
@@ -46,11 +45,15 @@ def prepare_history_frame(history_df: pd.DataFrame) -> pd.DataFrame:
     frame["Skin Name"] = frame["Skin Name"].fillna("").astype(str)
     frame["Condition"] = frame["Condition"].fillna("Unknown").astype(str)
     frame["Image URL"] = frame.get("Image URL", "").fillna("").astype(str)
-    frame = frame.dropna(subset=["Timestamp", "Family", "Skin Name", "Price"]).sort_values("Timestamp")
+    frame = frame.dropna(subset=["Timestamp", "Family", "Skin Name", "Price"]).sort_values(
+        "Timestamp"
+    )
     return frame
 
 
-def filter_high_value_families(history_df: pd.DataFrame, keywords: tuple[str, ...], min_price: float) -> pd.DataFrame:
+def filter_high_value_families(
+    history_df: pd.DataFrame, keywords: tuple[str, ...], min_price: float
+) -> pd.DataFrame:
     frame = history_df.copy()
     family_mask = frame["Family"].str.contains("|".join(keywords), case=False, na=False)
     frame = frame[family_mask].copy()
@@ -59,7 +62,9 @@ def filter_high_value_families(history_df: pd.DataFrame, keywords: tuple[str, ..
         .groupby("Family", as_index=False)
         .tail(1)[["Family", "Price"]]
     )
-    high_value_families = latest_family_prices[latest_family_prices["Price"] >= min_price]["Family"].tolist()
+    high_value_families = latest_family_prices[latest_family_prices["Price"] >= min_price][
+        "Family"
+    ].tolist()
     return frame[frame["Family"].isin(high_value_families)].copy()
 
 
@@ -79,7 +84,9 @@ def choose_image_url(variant_df: pd.DataFrame) -> str:
     return ""
 
 
-def filter_fallback_overrides_same_day(history: pd.DataFrame, fallback: pd.DataFrame) -> pd.DataFrame:
+def filter_fallback_overrides_same_day(
+    history: pd.DataFrame, fallback: pd.DataFrame
+) -> pd.DataFrame:
     """Drop fallback rows when direct history already has same-day data.
 
     This prevents fallback listing values from overriding fresh BUFF listings
@@ -104,7 +111,9 @@ def filter_fallback_overrides_same_day(history: pd.DataFrame, fallback: pd.DataF
     hist["__day"] = hist["Timestamp"].dt.strftime("%Y-%m-%d")
     fb["__day"] = fb["Timestamp"].dt.strftime("%Y-%m-%d")
 
-    existing = set(zip(hist["Family"].astype(str), hist["Condition"].astype(str), hist["__day"].astype(str)))
+    existing = set(
+        zip(hist["Family"].astype(str), hist["Condition"].astype(str), hist["__day"].astype(str))
+    )
     mask = [
         (str(fam), str(cond), str(day)) not in existing
         for fam, cond, day in zip(fb["Family"], fb["Condition"], fb["__day"])

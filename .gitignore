@@ -182,3 +182,5 @@ logs/
 .tmp/
 credentials.json
 credentials.json.bak
+
+page_meta_cache.sqlite3

@@ -8,8 +8,13 @@ import streamlit as st
 from gspread import WorksheetNotFound
 from streamlit_autorefresh import st_autorefresh
 
-from market_config import (
-    ALL_CATALOG_HEADERS,
+from app_data_utils import (
+    choose_image_url,
+    filter_high_value_families,
+    load_app_frames,
+    prepare_history_frame,
+)
+from main import (
     ALL_CATALOG_SHEET_NAME,
     CATALOG_HEADERS,
     CATALOG_SHEET_NAME,
@@ -18,17 +23,12 @@ from market_config import (
     DEFAULT_TRACK_KEYWORDS,
     FORECAST_SHEET_NAME,
     SHEET_NAME,
+    BuffPriceClient,
+    SheetStore,
+    csgotrader_snapshots,
+    load_history_frame,
+    sqlite_load_history_frame,
 )
-from src.scraper import BuffPriceClient, csgotrader_snapshots
-from src.data_loader import SheetStore, load_history_frame, sqlite_load_history_frame
-from app_data_utils import (
-    choose_image_url,
-    filter_fallback_overrides_same_day,
-    filter_high_value_families,
-    load_app_frames,
-    prepare_history_frame,
-)
-
 
 REFRESH_SECONDS = int(os.getenv("BUFF_UI_REFRESH_SEC", "900"))
 CACHE_TTL_SECONDS = int(os.getenv("BUFF_UI_CACHE_TTL_SEC", "300"))
@@ -65,7 +65,12 @@ def fallback_history_frame() -> pd.DataFrame:
 
 
 def merge_fallback_history(history: pd.DataFrame) -> pd.DataFrame:
-    if os.getenv("BUFF_APP_FALLBACK_CSGOTRADER", "1").strip().lower() not in {"1", "true", "yes", "on"}:
+    if os.getenv("BUFF_APP_FALLBACK_CSGOTRADER", "1").strip().lower() not in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
         return history
     try:
         fallback = fallback_history_frame()
@@ -77,24 +82,29 @@ def merge_fallback_history(history: pd.DataFrame) -> pd.DataFrame:
     history = history.copy()
     if {"Family", "Condition", "Listings", "Buy Orders"}.issubset(history.columns):
         hist_stats = (
-            history.assign(Timestamp=pd.to_datetime(history.get("Timestamp"), errors="coerce", utc=True))
+            history.assign(
+                Timestamp=pd.to_datetime(history.get("Timestamp"), errors="coerce", utc=True)
+            )
             .sort_values("Timestamp")
             .groupby(["Family", "Condition"], as_index=False)
             .tail(1)[["Family", "Condition", "Listings", "Buy Orders"]]
             .rename(columns={"Listings": "_Hist Listings", "Buy Orders": "_Hist Buy Orders"})
         )
         fallback = fallback.merge(hist_stats, on=["Family", "Condition"], how="left")
-        fallback["Listings"] = fallback["Listings"].where(fallback["Listings"].fillna(0) > 0, fallback["_Hist Listings"])
+        fallback["Listings"] = fallback["Listings"].where(
+            fallback["Listings"].fillna(0) > 0, fallback["_Hist Listings"]
+        )
         fallback["Buy Orders"] = fallback["Buy Orders"].where(
             fallback["Buy Orders"].fillna(0) > 0, fallback["_Hist Buy Orders"]
         )
         fallback = fallback.drop(columns=["_Hist Listings", "_Hist Buy Orders"])
-    fallback = filter_fallback_overrides_same_day(history, fallback)
     fallback["_Fallback Current"] = 1
     history["_Fallback Current"] = 0
     merged = pd.concat([history, fallback], ignore_index=True)
     merged["Timestamp"] = pd.to_datetime(merged["Timestamp"], errors="coerce", utc=True)
-    return merged.sort_values(["_Fallback Current", "Timestamp"]).drop(columns=["_Fallback Current"])
+    return merged.sort_values(["_Fallback Current", "Timestamp"]).drop(
+        columns=["_Fallback Current"]
+    )
 
 
 def base_knife_type(value: object) -> str:
@@ -113,7 +123,9 @@ def knife_tile_image(frame: pd.DataFrame) -> str:
         "Case Hardened",
     )
     for finish in priority:
-        image_url = choose_image_url(frame[frame["Family"].str.contains(finish, case=False, na=False)])
+        image_url = choose_image_url(
+            frame[frame["Family"].str.contains(finish, case=False, na=False)]
+        )
         if image_url:
             return image_url
     return choose_image_url(frame.sort_values("Timestamp"))
@@ -122,11 +134,16 @@ def knife_tile_image(frame: pd.DataFrame) -> str:
 @st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
 def live_buff_listing(family: str, condition: str, knife_type: str) -> dict[str, object]:
     if not os.getenv("BUFF_COOKIE"):
-        return {"status": "cookie missing", "checked_at": pd.Timestamp.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")}
+        return {
+            "status": "cookie missing",
+            "checked_at": pd.Timestamp.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+        }
     category = DEFAULT_KNIFE_CATEGORIES.get(base_knife_type(knife_type))
     try:
         client = BuffPriceClient(timeout=15)
-        snapshots = client.discover_snapshots_from_market(keyword=family, category=category, min_price=0, max_pages=1)
+        snapshots = client.discover_snapshots_from_market(
+            keyword=family, category=category, min_price=0, max_pages=1
+        )
         if not snapshots:
             skin_finish = family.split("|", 1)[-1].strip() if "|" in family else family
             snapshots = client.discover_snapshots_from_market(
@@ -516,22 +533,19 @@ history_df, catalog_df, all_catalog_df, forecast_df, startup_error = load_app_fr
 
 if startup_error is not None:
     try:
-        # Keep the public dashboard usable even if Google Sheets credentials are
-        # missing or temporarily unavailable. This fallback has prices but no
-        # live BUFF listing depth.
         history_df = fallback_history_frame()
         startup_error = None
     except Exception as fallback_error:
         st.error("Cannot load data source. Check Google Sheet credentials or enable SQLite mode.")
         st.code(str(startup_error))
-        st.info("Set `GSHEET_CREDS_JSON`/`credentials.json`, or set `BUFF_READ_SQLITE=1` with `BUFF_SQLITE_PATH`.")
+        st.info(
+            "Set `GSHEET_CREDS_JSON`/`credentials.json`, or set `BUFF_READ_SQLITE=1` with `BUFF_SQLITE_PATH`."
+        )
         st.code(f"Fallback failed: {fallback_error}")
         st.stop()
         raise SystemExit(0)
 
 if history_df.empty:
-    # Empty sheets can happen on first deploy. Show fallback data instead of an
-    # empty app so the UI remains testable before the first scheduled run.
     history_df = fallback_history_frame()
 
 history_df = merge_fallback_history(history_df)
@@ -547,7 +561,9 @@ history_df = prepare_history_frame(history_df)
 history_df = filter_high_value_families(history_df, TRACK_KEYWORDS, HIGH_VALUE_MIN_PRICE)
 
 if history_df.empty:
-    st.warning(f"No knife families above {HIGH_VALUE_MIN_PRICE:,.0f} CNY yet. Run `python main.py` to refresh.")
+    st.warning(
+        f"No knife families above {HIGH_VALUE_MIN_PRICE:,.0f} CNY yet. Run `python main.py` to refresh."
+    )
     st.stop()
     raise SystemExit(0)
 
@@ -566,19 +582,28 @@ st.markdown(
 
 family_names = sorted(history_df["Family"].dropna().unique().tolist())
 
-history_df["_Base Knife"] = history_df.get("Knife Type", history_df["Family"].str.split("|").str[0]).map(base_knife_type)
+history_df["_Base Knife"] = history_df.get(
+    "Knife Type", history_df["Family"].str.split("|").str[0]
+).map(base_knife_type)
 knife_counts = history_df.groupby("_Base Knife")["Family"].nunique().sort_index()
 knife_types = [knife for knife in DEFAULT_TRACK_KEYWORDS if knife in knife_counts.index]
-if "selected_knife_type" not in st.session_state or st.session_state["selected_knife_type"] not in knife_types:
+if (
+    "selected_knife_type" not in st.session_state
+    or st.session_state["selected_knife_type"] not in knife_types
+):
     st.session_state["selected_knife_type"] = knife_types[0] if knife_types else ""
 
 st.markdown('<div class="buff-picker-title">Choose knife type</div>', unsafe_allow_html=True)
 for row_start in range(0, len(knife_types), 5):
     cols = st.columns(5)
-    for col, knife_type in zip(cols, knife_types[row_start:row_start + 5]):
+    for col, knife_type in zip(cols, knife_types[row_start : row_start + 5]):
         knife_df = history_df[history_df["_Base Knife"] == knife_type].copy()
         image_url = knife_tile_image(knife_df.sort_values("Timestamp"))
-        active_class = " buff-knife-tile-active" if st.session_state["selected_knife_type"] == knife_type else ""
+        active_class = (
+            " buff-knife-tile-active"
+            if st.session_state["selected_knife_type"] == knife_type
+            else ""
+        )
         with col:
             st.markdown(
                 f"""
@@ -589,11 +614,20 @@ for row_start in range(0, len(knife_types), 5):
                 """,
                 unsafe_allow_html=True,
             )
-            if st.button(f"{knife_type} ({int(knife_counts[knife_type])})", key=f"knife_{knife_type}", width="stretch"):
+            if st.button(
+                f"{knife_type} ({int(knife_counts[knife_type])})",
+                key=f"knife_{knife_type}",
+                width="stretch",
+            ):
                 st.session_state["selected_knife_type"] = knife_type
 
 selected_knife_type = st.session_state["selected_knife_type"]
-scoped_names = sorted(history_df.loc[history_df["_Base Knife"] == selected_knife_type, "Family"].dropna().unique().tolist())
+scoped_names = sorted(
+    history_df.loc[history_df["_Base Knife"] == selected_knife_type, "Family"]
+    .dropna()
+    .unique()
+    .tolist()
+)
 filtered_families = scoped_names
 if not filtered_families:
     filtered_families = scoped_names or family_names
@@ -608,14 +642,25 @@ family_df = history_df[history_df["Family"] == family_selected].copy()
 
 condition_latest = (
     family_df.sort_values("Timestamp")
-    .assign(_source_key=lambda frame: frame.get("Source", pd.Series("", index=frame.index)).eq("Fallback").astype(int))
+    .assign(
+        _source_key=lambda frame: frame.get("Source", pd.Series("", index=frame.index))
+        .eq("Fallback")
+        .astype(int)
+    )
     .sort_values(["_source_key", "Timestamp"])
     .groupby("Condition", as_index=False)
     .tail(1)
-    .assign(_sort_key=lambda frame: frame["Condition"].map(lambda value: CONDITION_ORDER.get(str(value), 50)))
+    .assign(
+        _sort_key=lambda frame: frame["Condition"].map(
+            lambda value: CONDITION_ORDER.get(str(value), 50)
+        )
+    )
     .sort_values(["_sort_key", "Condition"])
 )
-condition_labels = [f"{row['Condition'] or 'Unknown'}  {float(row['Price']):,.2f} CNY" for _, row in condition_latest.iterrows()]
+condition_labels = [
+    f"{row['Condition'] or 'Unknown'}  {float(row['Price']):,.2f} CNY"
+    for _, row in condition_latest.iterrows()
+]
 condition_map = dict(zip(condition_labels, condition_latest["Condition"].tolist()))
 
 selected_condition_label = st.radio(
@@ -629,12 +674,20 @@ condition_selected = condition_map[selected_condition_label]
 variant_df = (
     family_df[family_df["Condition"] == condition_selected]
     .copy()
-    .assign(_source_key=lambda frame: frame.get("Source", pd.Series("", index=frame.index)).eq("Fallback").astype(int))
+    .assign(
+        _source_key=lambda frame: frame.get("Source", pd.Series("", index=frame.index))
+        .eq("Fallback")
+        .astype(int)
+    )
     .sort_values(["_source_key", "Timestamp"])
 )
 latest = variant_df.iloc[-1]
 image_url = choose_image_url(variant_df)
-reference_price = float(latest["Reference Price"]) if pd.notna(latest["Reference Price"]) else float(latest["Price"])
+reference_price = (
+    float(latest["Reference Price"])
+    if pd.notna(latest["Reference Price"])
+    else float(latest["Price"])
+)
 buy_orders = int(latest["Buy Orders"]) if pd.notna(latest["Buy Orders"]) else 0
 sell_stock = int(latest["Listings"]) if pd.notna(latest["Listings"]) else 0
 knife_category = family_selected.split("|")[0].strip()
@@ -643,8 +696,6 @@ live_listing: dict[str, object] = {}
 if os.getenv("BUFF_APP_LIVE_LISTINGS", "1").strip().lower() in {"1", "true", "yes", "on"}:
     live_listing = live_buff_listing(family_selected, condition_selected, knife_category)
     if live_listing.get("status") == "live":
-        # The sheet is historical; this optional live call refreshes the
-        # currently selected skin so listings/buy orders feel current in the UI.
         sell_stock = int(live_listing.get("listings") or 0)
         buy_orders = int(live_listing.get("buy_orders") or 0)
         goods_id = str(live_listing.get("goods_id") or goods_id)
@@ -682,29 +733,38 @@ st.markdown(
 
 metric_cols = st.columns(4)
 metric_cols[0].metric("Lowest Sell", f"{float(latest['Price']):,.2f} CNY")
-metric_cols[1].metric("Listings", sell_stock if sell_stock else "N/A", help=f"Source: {listing_source}")
+metric_cols[1].metric(
+    "Listings", sell_stock if sell_stock else "N/A", help=f"Source: {listing_source}"
+)
 metric_cols[2].metric("Buy Orders", buy_orders)
 metric_cols[3].metric("Last Update", latest["Timestamp"].strftime("%Y-%m-%d"))
-live_status = str(live_listing.get("status") or ("disabled" if not os.getenv("BUFF_APP_LIVE_LISTINGS", "1").strip().lower() in {"1", "true", "yes", "on"} else "not checked"))
+live_status = str(
+    live_listing.get("status")
+    or (
+        "disabled"
+        if os.getenv("BUFF_APP_LIVE_LISTINGS", "1").strip().lower()
+        not in {"1", "true", "yes", "on"}
+        else "not checked"
+    )
+)
 live_checked = str(live_listing.get("checked_at") or "N/A")
 status_cols = st.columns((1.2, 1.2, 2.6))
 status_cols[0].caption(f"Live listing: {live_status}")
 status_cols[1].caption(f"Checked: {live_checked}")
 status_cols[2].caption(
-    "Set `BUFF_COOKIE` in Streamlit/GitHub secrets." if live_status == "cookie missing" else f"Cache TTL: {CACHE_TTL_SECONDS}s"
+    "Set `BUFF_COOKIE` in Streamlit/GitHub secrets."
+    if live_status == "cookie missing"
+    else f"Cache TTL: {CACHE_TTL_SECONDS}s"
 )
 
 daily_df = variant_df.copy()
 if "Listings" in daily_df.columns:
     daily_df.loc[daily_df["Listings"].fillna(0) <= 0, "Listings"] = pd.NA
 daily_df["Day"] = daily_df["Timestamp"].dt.date
-daily_df = (
-    daily_df.groupby("Day", as_index=False)
-    .agg(
-        Price=("Price", "mean"),
-        Listings=("Listings", "last"),
-        BuyOrders=("Buy Orders", "last"),
-    )
+daily_df = daily_df.groupby("Day", as_index=False).agg(
+    Price=("Price", "mean"),
+    Listings=("Listings", "last"),
+    BuyOrders=("Buy Orders", "last"),
 )
 daily_df["Day"] = pd.to_datetime(daily_df["Day"])
 
@@ -801,7 +861,9 @@ with tab1:
     ].sort_values("Timestamp", ascending=False)
     sell_view["Listings"] = sell_view["Listings"].fillna(0).astype(int)
     sell_view["Buy Orders"] = sell_view["Buy Orders"].fillna(0).astype(int)
-    sell_view["Observed Orders"] = pd.to_numeric(sell_view["Observed Orders"], errors="coerce").fillna(0).astype(int)
+    sell_view["Observed Orders"] = (
+        pd.to_numeric(sell_view["Observed Orders"], errors="coerce").fillna(0).astype(int)
+    )
     st.dataframe(sell_view, width="stretch", hide_index=True)
 
 with tab2:
@@ -816,14 +878,20 @@ with tab2:
         catalog_df["Condition"] = catalog_df["Condition"].fillna("Unknown").astype(str)
         family_catalog = (
             catalog_df[catalog_df["Family"] == family_selected]
-            .assign(_sort_key=lambda frame: frame["Condition"].map(lambda value: CONDITION_ORDER.get(str(value), 50)))
+            .assign(
+                _sort_key=lambda frame: frame["Condition"].map(
+                    lambda value: CONDITION_ORDER.get(str(value), 50)
+                )
+            )
             .sort_values(["_sort_key", "Condition"])
             .drop(columns=["_sort_key"])
         )
         family_catalog["Listings"] = family_catalog["Listings"].fillna(0).astype(int)
         family_catalog["Buy Orders"] = family_catalog["Buy Orders"].fillna(0).astype(int)
         st.dataframe(
-            family_catalog[["Skin Name", "Condition", "Price", "Listings", "Buy Orders", "Goods ID"]],
+            family_catalog[
+                ["Skin Name", "Condition", "Price", "Listings", "Buy Orders", "Goods ID"]
+            ],
             width="stretch",
             hide_index=True,
         )
@@ -835,9 +903,13 @@ with tab3:
         st.info("Forecast sheet is empty.")
     else:
         forecast_df["Forecast Date"] = pd.to_datetime(forecast_df["Forecast Date"], errors="coerce")
-        forecast_df["Predicted Price"] = pd.to_numeric(forecast_df.get("Predicted Price"), errors="coerce")
+        forecast_df["Predicted Price"] = pd.to_numeric(
+            forecast_df.get("Predicted Price"), errors="coerce"
+        )
         if "Predicted Listings" in forecast_df.columns:
-            forecast_df["Predicted Listings"] = pd.to_numeric(forecast_df.get("Predicted Listings"), errors="coerce")
+            forecast_df["Predicted Listings"] = pd.to_numeric(
+                forecast_df.get("Predicted Listings"), errors="coerce"
+            )
         target_skin_name = f"{family_selected} ({condition_selected})"
         forecast_view = forecast_df[forecast_df["Skin Name"] == target_skin_name].dropna()
         if forecast_view.empty:
@@ -850,7 +922,12 @@ with tab3:
                     .encode(
                         x=alt.X("Forecast Date:T", title="Date"),
                         y=alt.Y("Predicted Price:Q", title="Predicted Price (CNY)"),
-                        tooltip=["Forecast Date:T", "Predicted Price:Q", "Predicted Listings:Q", "Model:N"],
+                        tooltip=[
+                            "Forecast Date:T",
+                            "Predicted Price:Q",
+                            "Predicted Listings:Q",
+                            "Model:N",
+                        ],
                     )
                     .properties(height=320)
                 )
@@ -864,7 +941,12 @@ with tab3:
                             title="Predicted Sell Stock",
                             axis=alt.Axis(orient="right"),
                         ),
-                        tooltip=["Forecast Date:T", "Predicted Price:Q", "Predicted Listings:Q", "Model:N"],
+                        tooltip=[
+                            "Forecast Date:T",
+                            "Predicted Price:Q",
+                            "Predicted Listings:Q",
+                            "Model:N",
+                        ],
                     )
                     .properties(height=320)
                 )
@@ -872,7 +954,11 @@ with tab3:
                     alt.layer(price_forecast, listings_forecast).resolve_scale(y="independent"),
                     width="stretch",
                 )
-                show_cols = [col for col in ("Forecast Date", "Predicted Price", "Predicted Listings", "Model") if col in forecast_view.columns]
+                show_cols = [
+                    col
+                    for col in ("Forecast Date", "Predicted Price", "Predicted Listings", "Model")
+                    if col in forecast_view.columns
+                ]
                 st.dataframe(
                     forecast_view[show_cols].sort_values("Forecast Date"),
                     width="stretch",
@@ -911,6 +997,29 @@ with tab4:
             if col in all_catalog_df.columns:
                 all_catalog_df[col] = pd.to_numeric(all_catalog_df[col], errors="coerce")
         all_catalog_df["Family"] = all_catalog_df.get("Family", "").fillna("").astype(str)
-        scoped = all_catalog_df[all_catalog_df["Family"] == family_selected].copy() if family_selected else all_catalog_df.copy()
-        cols = [c for c in ("Timestamp", "Skin Name", "Condition", "Price", "Listings", "Buy Orders", "Reference Price", "Goods ID", "Goods URL", "Image URL") if c in scoped.columns]
-        st.dataframe(scoped[cols].sort_values(["Price"], ascending=False, na_position="last"), width="stretch", hide_index=True)
+        scoped = (
+            all_catalog_df[all_catalog_df["Family"] == family_selected].copy()
+            if family_selected
+            else all_catalog_df.copy()
+        )
+        cols = [
+            c
+            for c in (
+                "Timestamp",
+                "Skin Name",
+                "Condition",
+                "Price",
+                "Listings",
+                "Buy Orders",
+                "Reference Price",
+                "Goods ID",
+                "Goods URL",
+                "Image URL",
+            )
+            if c in scoped.columns
+        ]
+        st.dataframe(
+            scoped[cols].sort_values(["Price"], ascending=False, na_position="last"),
+            width="stretch",
+            hide_index=True,
+        )
