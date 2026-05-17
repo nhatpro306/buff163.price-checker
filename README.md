@@ -21,6 +21,7 @@ Check the Streamlit app here after deployment:
 - Provides a Streamlit dashboard with price history, listing counts, condition filtering, and catalog tables.
 - Supports scheduled GitHub Actions runs.
 - Includes optional fallback data from CSGO Trader.
+- Backfills fallback listing and buy-order depth from latest known history to reduce missing listing days.
 - Supports optional forecast generation.
 - Can be deployed to Streamlit Cloud or Render.
 
@@ -125,6 +126,8 @@ $env:BUFF_SHEET_NAME = "YourSheetName"
 | `BUFF_HIGH_VALUE_PAGES` | Number of BUFF market pages to scan | `25` in code, `2` in GitHub Actions |
 | `BUFF_FULL_CATALOG` | Enable full catalog scan | `false` |
 | `BUFF_FULL_CATALOG_PAGES` | Number of full catalog pages to scan | `60` in code, `12` in GitHub Actions |
+| `BUFF_FALLBACK_CSGOTRADER` | Enable fallback price source when direct BUFF misses items | `false` |
+| `BUFF_MIN_FALLBACK_SNAPSHOTS` | Minimum fallback rows required, fail run if lower | `0` |
 | `BUFF_ENABLE_FORECAST` | Enable forecast sheet generation | `false` in scheduled workflow |
 | `BUFF_WRITE_SQLITE` | Write snapshots to SQLite | `false` |
 | `BUFF_READ_SQLITE` | Read dashboard data from SQLite | `false` |
@@ -157,8 +160,8 @@ streamlit run app.py
 
 The workflow in `.github/workflows/buff-tracker.yml` runs twice per day:
 
-- `08:00 JST`
-- `18:00 JST`
+- `00:00 JST`
+- `12:00 JST`
 
 Required repository secrets:
 
@@ -167,6 +170,12 @@ Required repository secrets:
 - `BUFF_COOKIE` optional, useful if BUFF requires authenticated access
 
 Manual runs are also supported from the GitHub Actions tab through `workflow_dispatch`.
+
+## Fallback Listing Backfill
+
+When direct BUFF scanning misses some knives, fallback prices can still be collected from CSGO Trader.
+
+Because fallback does not provide live listing depth, the tracker now reuses the latest known `Listings` and `Buy Orders` from your existing history for matching `Family + Condition` keys. This keeps recent rows more complete while still avoiding extra BUFF API requests that can increase rate-limit risk.
 
 ## Streamlit Cloud Deployment
 

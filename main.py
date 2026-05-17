@@ -1241,6 +1241,80 @@ def merge_direct_and_fallback_snapshots(
     )
 
 
+def enrich_fallback_snapshots_with_latest_depth(
+    snapshots: list[MarketSnapshot],
+    history: pd.DataFrame,
+) -> tuple[list[MarketSnapshot], int]:
+    """Backfill fallback listing/buy-order depth from latest known history.
+
+    CSGOTrader fallback rows improve price coverage but do not provide live
+    BUFF listing depth. For fallback-only rows, we reuse the latest known
+    listing/buy-order values for the same market key (family + condition).
+    """
+    if not snapshots or history.empty:
+        return snapshots, 0
+
+    required_cols = {"Timestamp", "Family", "Condition", "Listings"}
+    if not required_cols.issubset(set(history.columns)):
+        return snapshots, 0
+
+    frame = history.copy()
+    frame["Timestamp"] = pd.to_datetime(frame["Timestamp"], errors="coerce", utc=True)
+    frame["Family"] = frame["Family"].fillna("").astype(str).map(canonicalize_family_name)
+    frame["Condition"] = frame["Condition"].fillna("Unknown").astype(str)
+    frame["Listings"] = pd.to_numeric(frame["Listings"], errors="coerce")
+    frame["Buy Orders"] = pd.to_numeric(frame.get("Buy Orders"), errors="coerce").fillna(0)
+    frame = frame.dropna(subset=["Timestamp", "Family", "Condition", "Listings"]).sort_values("Timestamp")
+    if frame.empty:
+        return snapshots, 0
+
+    latest_by_key: dict[tuple[str, str], tuple[int, int]] = {}
+    for row in frame[["Family", "Condition", "Listings", "Buy Orders"]].itertuples(index=False):
+        listings = max(0, int(round(float(row[2]))))
+        buy_orders = max(0, int(round(float(row[3]))))
+        if listings <= 0 and buy_orders <= 0:
+            continue
+        latest_by_key[(row[0], row[1])] = (listings, buy_orders)
+    if not latest_by_key:
+        return snapshots, 0
+
+    enriched_snapshots: list[MarketSnapshot] = []
+    filled_rows = 0
+    for snapshot in snapshots:
+        if not snapshot.goods_id.startswith("csgotrader:"):
+            enriched_snapshots.append(snapshot)
+            continue
+        needs_listings = snapshot.listings <= 0
+        needs_buy_orders = snapshot.buy_orders <= 0
+        if not (needs_listings or needs_buy_orders):
+            enriched_snapshots.append(snapshot)
+            continue
+
+        key = (canonicalize_family_name(snapshot.family), snapshot.condition)
+        depth = latest_by_key.get(key)
+        if depth is None:
+            enriched_snapshots.append(snapshot)
+            continue
+
+        listings, buy_orders = depth
+        updated = MarketSnapshot(
+            goods_id=snapshot.goods_id,
+            family=snapshot.family,
+            skin_name=snapshot.skin_name,
+            condition=snapshot.condition,
+            price=snapshot.price,
+            listings=listings if needs_listings else snapshot.listings,
+            buy_orders=buy_orders if needs_buy_orders else snapshot.buy_orders,
+            reference_price=snapshot.reference_price,
+            image_url=snapshot.image_url,
+            observed_orders=snapshot.observed_orders,
+        )
+        if updated.listings != snapshot.listings or updated.buy_orders != snapshot.buy_orders:
+            filled_rows += 1
+        enriched_snapshots.append(updated)
+    return enriched_snapshots, filled_rows
+
+
 def run(migrate_only: bool = False) -> None:
     sqlite_path = os.getenv("BUFF_SQLITE_PATH", DEFAULT_SQLITE_PATH).strip()
     enable_sqlite = env_flag("BUFF_WRITE_SQLITE", False)
@@ -1298,6 +1372,9 @@ def run(migrate_only: bool = False) -> None:
         )
     if env_flag("BUFF_FALLBACK_CSGOTRADER", False):
         fallback_snapshots = csgotrader_snapshots(track_keywords, min_price)
+        fallback_snapshots, backfilled_rows = enrich_fallback_snapshots_with_latest_depth(fallback_snapshots, history)
+        if backfilled_rows:
+            print(f"Fallback depth backfill: {backfilled_rows} rows reused latest listing depth.")
         min_fallback_snapshots = int(os.getenv("BUFF_MIN_FALLBACK_SNAPSHOTS", "0") or "0")
         if min_fallback_snapshots and len(fallback_snapshots) < min_fallback_snapshots:
             # A tiny fallback result would silently create missing price days.
