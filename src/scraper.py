@@ -16,4 +16,3 @@ __all__ = [
     "merge_direct_and_fallback_snapshots",
     "enrich_fallback_snapshots_with_latest_depth",
 ]
-

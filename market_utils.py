@@ -13,7 +13,6 @@ import requests
 
 from market_config import CSGO_API_SKINS_URL
 
-
 QUALITY_MAP = {
     "崭新出厂": "Factory New",
     "略有磨损": "Minimal Wear",
