@@ -4,7 +4,7 @@ A Python + Streamlit project for tracking CS2 knife prices from BUFF163, storing
 
 The project has two main entry points:
 
-- `main.py` collects market data, writes history, rebuilds catalog sheets, generates signals, and optionally creates forecasts.
+- `main.py` is the command-line compatibility entry point. It keeps old imports working while delegating logic to `src/`.
 - `app.py` runs the Streamlit dashboard for browsing knife prices, listings, buy orders, history charts, condition catalogs, forecasts, and full catalog data.
 
 ## Features
@@ -34,14 +34,28 @@ The project has two main entry points:
 
 ```text
 .
-|-- app.py                  # Streamlit dashboard
-|-- app_data_utils.py       # Data loading and cleaning helpers for the app
-|-- main.py                 # Price tracker, storage, analysis, and forecast logic
-|-- requirements.txt        # Python dependencies
-|-- runtime.txt             # Python runtime for hosting platforms
-|-- render.yaml             # Render deployment config
+|-- app.py                    # Streamlit dashboard
+|-- app_data_utils.py         # Data loading and cleaning helpers for the app
+|-- main.py                   # CLI facade and backward-compatible public exports
+|-- requirements.txt          # Python dependencies
+|-- runtime.txt               # Python runtime for hosting platforms
+|-- render.yaml               # Render deployment config
+|-- src/
+|   |-- cli.py                # argparse entry point
+|   |-- orchestrator.py       # high-level tracker run flow
+|   |-- settings.py           # environment-driven tracker settings
+|   |-- snapshot_merge.py     # direct/fallback/full-catalog merge helpers
+|   |-- client.py             # BUFF sync/async client exports
+|   |-- analysis.py           # price analysis and signal classification
+|   |-- etl.py                # history normalization helpers
+|   `-- storage/
+|       |-- credentials.py    # Google credential loading
+|       |-- sheets.py         # Google Sheets writers/readers
+|       `-- sqlite.py         # SQLite persistence
+|-- tests/                    # pytest coverage for client, analysis, ETL, cache, and merges
 `-- .github/workflows/
-    `-- buff-tracker.yml    # Scheduled GitHub Actions tracker run
+    |-- buff-tracker.yml      # Scheduled GitHub Actions tracker run
+    `-- lint.yml              # lint, type check, and test workflow
 ```
 
 ## Local Setup
@@ -161,6 +175,24 @@ Required repository secrets:
 
 Manual runs are also supported from the GitHub Actions tab through `workflow_dispatch`.
 
+## Development Checks
+
+Run these before opening or merging a pull request:
+
+```powershell
+python main.py --help
+python -m pytest tests -q
+python -m ruff check .
+python -m black --check .
+python -m mypy src main.py
+```
+
+The Streamlit dashboard imports several compatibility names from `main.py`, so this smoke check is useful after refactors:
+
+```powershell
+python -c "from main import BuffPriceClient, SheetStore, csgotrader_snapshots, load_history_frame, sqlite_load_history_frame; print('compat OK')"
+```
+
 ## Streamlit Cloud Deployment
 
 Use `app.py` as the Streamlit entry point.
@@ -200,7 +232,7 @@ Set the same credentials and environment variables in the Render dashboard.
 ```text
 BUFF163 / fallback source
         |
-main.py tracker
+src/orchestrator.py tracker flow
         |
 Google Sheets or SQLite
         |
@@ -217,7 +249,7 @@ Important programming concepts used in this project:
 - Data modeling: `MarketSnapshot` uses a dataclass to represent one clean market record.
 - ETL pipeline: data is extracted from APIs, transformed into normalized rows, and loaded into Sheets or SQLite.
 - Caching: Streamlit cache decorators reduce repeated network and Google Sheets calls.
-- Separation of concerns: `main.py` handles collection and analysis; `app.py` handles UI; `app_data_utils.py` handles reusable data preparation.
+- Separation of concerns: `main.py` stays small for compatibility, `src/orchestrator.py` coordinates collection, `src/storage/` handles persistence, and `app.py` handles UI.
 - Time series basics: historical prices are grouped over time and can be used for simple forecasting.
 
 ## Security Notes
@@ -233,6 +265,8 @@ Important programming concepts used in this project:
 - Add price alert notifications through Discord, email, or Telegram.
 - Add clearer error messages for missing Google Sheets permissions.
 - Add deployment screenshots to make the GitHub page more visual.
+- Split the large BUFF client into separate sync and async client modules.
+- Split Google Sheets writers into smaller modules if sheet logic grows further.
 
 
 ## Docker
