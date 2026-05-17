@@ -1243,6 +1243,62 @@ def merge_direct_and_fallback_snapshots(
     )
 
 
+def merge_snapshots_with_full_catalog(
+    primary_snapshots: list[MarketSnapshot],
+    full_snapshots: list[MarketSnapshot],
+) -> list[MarketSnapshot]:
+    """Merge primary run snapshots with full-catalog depth rows.
+
+    Primary rows (direct/fallback) stay the base, while full-catalog rows:
+    - enrich listing/buy-order depth for the same Family+Condition keys
+    - fill missing Family+Condition keys so all tracked knives appear
+    """
+    if not primary_snapshots:
+        return sorted(
+            full_snapshots,
+            key=lambda item: (item.family, CONDITION_ORDER.get(item.condition, 50), item.goods_id),
+        )
+    if not full_snapshots:
+        return sorted(
+            primary_snapshots,
+            key=lambda item: (item.family, CONDITION_ORDER.get(item.condition, 50), item.goods_id),
+        )
+
+    full_by_key: dict[tuple[str, str], MarketSnapshot] = {
+        (snapshot.family, snapshot.condition): snapshot for snapshot in full_snapshots
+    }
+    merged: dict[tuple[str, str], MarketSnapshot] = {}
+
+    for snapshot in primary_snapshots:
+        key = (snapshot.family, snapshot.condition)
+        full_snapshot = full_by_key.get(key)
+        if full_snapshot is None:
+            merged[key] = snapshot
+            continue
+        # Keep primary price source, but trust full-catalog for live depth.
+        merged[key] = MarketSnapshot(
+            goods_id=full_snapshot.goods_id or snapshot.goods_id,
+            family=snapshot.family,
+            skin_name=snapshot.skin_name,
+            condition=snapshot.condition,
+            price=snapshot.price,
+            listings=full_snapshot.listings if full_snapshot.listings > 0 else snapshot.listings,
+            buy_orders=full_snapshot.buy_orders if full_snapshot.buy_orders > 0 else snapshot.buy_orders,
+            reference_price=full_snapshot.reference_price if full_snapshot.reference_price is not None else snapshot.reference_price,
+            image_url=full_snapshot.image_url or snapshot.image_url,
+            observed_orders=full_snapshot.observed_orders if full_snapshot.observed_orders > 0 else snapshot.observed_orders,
+        )
+
+    for snapshot in full_snapshots:
+        key = (snapshot.family, snapshot.condition)
+        merged.setdefault(key, snapshot)
+
+    return sorted(
+        merged.values(),
+        key=lambda item: (item.family, CONDITION_ORDER.get(item.condition, 50), item.goods_id),
+    )
+
+
 def enrich_fallback_snapshots_with_latest_depth(
     snapshots: list[MarketSnapshot],
     history: pd.DataFrame,
@@ -1403,6 +1459,7 @@ def run(migrate_only: bool = False) -> None:
             max_pages_per_keyword=max_pages,
             match_keywords=track_keywords,
         )
+        snapshots = merge_snapshots_with_full_catalog(snapshots, full_snapshots)
         rebuild_all_catalog(store, full_snapshots, timestamp)
 
     if enable_sqlite and sqlite_path and write_sheets:
