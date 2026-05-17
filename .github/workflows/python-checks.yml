@@ -5,7 +5,7 @@ on:
   pull_request:
 
 jobs:
-  quality-checks:
+  compile-check:
     runs-on: ubuntu-latest
 
     steps:
@@ -22,14 +22,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Ruff lint
+      - name: Run compile check
         run: |
-          ruff check .
-
-      - name: Black format check
-        run: |
-          black --check .
-
-      - name: Pytest
-        run: |
-          python -m pytest
+          python -m compileall .

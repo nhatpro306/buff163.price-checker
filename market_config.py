@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 
+
 SHEET_NAME = os.getenv("BUFF_SHEET_NAME", "BuffKnifeTracker")
 LOG_SHEET_NAME = "HistoryLog"
 CATALOG_SHEET_NAME = "Catalog"

@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import sqlite3
 import time
-from datetime import datetime, timezone
 from http.cookies import SimpleCookie
+from datetime import datetime, timezone
 from pathlib import Path
+from statistics import mean, pstdev
 from typing import Any
 
 import gspread
@@ -51,11 +53,9 @@ from market_utils import (
     steam_image_url,
     try_float,
 )
-from src.analysis import PriceAnalysisAgent
 
 # Note: `src/` modules provide thin re-export wrappers for cleaner imports in
 # UI and future modularization without changing tracker runtime behavior here.
-
 
 class BuffPriceClient:
     SELL_ORDER_URL = "https://buff.163.com/api/market/goods/sell_order"
@@ -254,7 +254,9 @@ class BuffPriceClient:
                     break
             if max_goods is not None and len(snapshots) >= max_goods:
                 break
-            queue.extend(self.discover_goods_ids_from_market(keyword=keyword, category=category, max_pages=0))
+            queue.extend(
+                self.discover_goods_ids_from_market(keyword=keyword, category=category, max_pages=0)
+            )
         queue = sorted(set(queue))
 
         seen: set[str] = set()
@@ -302,7 +304,11 @@ class BuffPriceClient:
             return None
         info = item.get("goods_info") or item
         market_hash_name = (
-            info.get("market_hash_name") or item.get("market_hash_name") or info.get("name") or item.get("name") or ""
+            info.get("market_hash_name")
+            or item.get("market_hash_name")
+            or info.get("name")
+            or item.get("name")
+            or ""
         )
         if not market_hash_name:
             return None
@@ -392,9 +398,7 @@ class BuffPriceClient:
         queue = [str(goods_id) for goods_id in (seed_goods_ids or []) if str(goods_id).strip()]
         for query in keywords:
             keyword, category = query if isinstance(query, tuple) else (query, None)
-            queue.extend(
-                self.discover_goods_ids_from_market(keyword=keyword, category=category, max_pages=max_pages_per_keyword)
-            )
+            queue.extend(self.discover_goods_ids_from_market(keyword=keyword, category=category, max_pages=max_pages_per_keyword))
         queue = sorted(set(queue))
 
         seen: set[str] = set()
@@ -527,7 +531,8 @@ def sqlite_connect(db_path: str) -> sqlite3.Connection:
 
 
 def sqlite_init(conn: sqlite3.Connection) -> None:
-    conn.executescript("""
+    conn.executescript(
+        """
         CREATE TABLE IF NOT EXISTS goods (
             goods_id TEXT PRIMARY KEY,
             family TEXT NOT NULL,
@@ -551,7 +556,8 @@ def sqlite_init(conn: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_snapshots_goods_ts ON snapshots(goods_id, ts);
         CREATE INDEX IF NOT EXISTS idx_snapshots_ts ON snapshots(ts);
-        """)
+        """
+    )
     goods_cols = {row[1] for row in conn.execute("PRAGMA table_info(goods);")}
     if "reference_price" not in goods_cols:
         conn.execute("ALTER TABLE goods ADD COLUMN reference_price REAL;")
@@ -655,6 +661,91 @@ def sqlite_load_history_frame(db_path: str) -> pd.DataFrame:
     finally:
         conn.close()
     return frame.reindex(columns=HISTORY_HEADERS)
+
+
+class PriceAnalysisAgent:
+    def __init__(self, history: pd.DataFrame) -> None:
+        self.history = history.copy()
+        if not self.history.empty:
+            self.history["Timestamp"] = pd.to_datetime(self.history["Timestamp"], errors="coerce", utc=True)
+            self.history["Price"] = pd.to_numeric(self.history["Price"], errors="coerce")
+            self.history["Listings"] = pd.to_numeric(self.history["Listings"], errors="coerce")
+            self.history = self.history.dropna(subset=["Timestamp", "Skin Name", "Price", "Listings"])
+
+    def summarize_skin(self, skin_name: str) -> dict[str, Any] | None:
+        skin_history = self.history[self.history["Skin Name"] == skin_name].sort_values("Timestamp")
+        if skin_history.empty:
+            return None
+
+        prices = skin_history["Price"].tolist()
+        listings = skin_history["Listings"].tolist()
+        latest_price = prices[-1]
+        baseline_price = mean(prices[:-1]) if len(prices) > 1 else latest_price
+        avg_price = mean(prices)
+        min_price = min(prices)
+        max_price = max(prices)
+        price_stddev = pstdev(prices) if len(prices) > 1 else 0.0
+        volatility_pct = (price_stddev / avg_price * 100) if avg_price else 0.0
+        price_change_pct = ((latest_price - baseline_price) / baseline_price * 100) if baseline_price else 0.0
+        listing_avg = mean(listings)
+        latest_listings = listings[-1]
+        listing_pressure_pct = ((latest_listings - listing_avg) / listing_avg * 100) if listing_avg else 0.0
+
+        signal, confidence, rationale = self._classify(
+            latest_price=latest_price,
+            avg_price=avg_price,
+            min_price=min_price,
+            max_price=max_price,
+            latest_listings=latest_listings,
+            listing_avg=listing_avg,
+            volatility_pct=volatility_pct,
+        )
+
+        return {
+            "skin_name": skin_name,
+            "latest_price": round(latest_price, 2),
+            "average_price": round(avg_price, 2),
+            "min_price": round(min_price, 2),
+            "max_price": round(max_price, 2),
+            "price_change_pct": round(price_change_pct, 2),
+            "volatility_pct": round(volatility_pct, 2),
+            "latest_listings": int(latest_listings),
+            "listing_pressure_pct": round(listing_pressure_pct, 2),
+            "signal": signal,
+            "confidence": round(confidence, 2),
+            "rationale": rationale,
+            "data_points": len(prices),
+        }
+
+    def _classify(
+        self,
+        *,
+        latest_price: float,
+        avg_price: float,
+        min_price: float,
+        max_price: float,
+        latest_listings: float,
+        listing_avg: float,
+        volatility_pct: float,
+    ) -> tuple[str, float, str]:
+        undervalued = latest_price < avg_price * 0.97
+        overvalued = latest_price > avg_price * 1.03
+        listing_spike = latest_listings > listing_avg * 1.1 if listing_avg else False
+        listing_drop = latest_listings < listing_avg * 0.9 if listing_avg else False
+        near_floor = math.isclose(latest_price, min_price, rel_tol=0.01) or latest_price <= min_price * 1.03
+        near_ceiling = math.isclose(latest_price, max_price, rel_tol=0.01) or latest_price >= max_price * 0.97
+
+        if undervalued and listing_spike:
+            return ("BUY_WATCH", 0.79, "Price is below its average while stock is elevated.")
+        if overvalued and listing_drop:
+            return ("SELL_WATCH", 0.76, "Price is above its average while sell-side stock is tightening.")
+        if near_floor:
+            return ("ACCUMULATE", 0.67, "Price is near the observed floor for this condition.")
+        if near_ceiling:
+            return ("TAKE_PROFIT", 0.66, "Price is near the observed ceiling for this condition.")
+        if volatility_pct >= 8:
+            return ("HIGH_VOLATILITY", 0.58, "Price swings are elevated relative to the average.")
+        return ("HOLD", 0.45, "Current price and listing depth are near the recent baseline.")
 
 
 def resolve_credentials_path() -> Path:
@@ -1116,11 +1207,9 @@ def csgotrader_snapshots(track_keywords: list[str], min_price_cny: float) -> lis
                 price=price,
                 listings=0,
                 buy_orders=0,
-                reference_price=(
-                    try_float((highest_order or {}).get("price")) * usd_to_cny
-                    if try_float((highest_order or {}).get("price")) is not None
-                    else None
-                ),
+                reference_price=try_float((highest_order or {}).get("price")) * usd_to_cny
+                if try_float((highest_order or {}).get("price")) is not None
+                else None,
                 image_url=image_url,
                 observed_orders=0,
             )
@@ -1140,7 +1229,10 @@ def merge_direct_and_fallback_snapshots(
     orders. Fallback rows fill price gaps for knives that the direct scan did
     not find during that scheduled run.
     """
-    snapshots_by_market_key = {(snapshot.family, snapshot.condition): snapshot for snapshot in direct_snapshots}
+    snapshots_by_market_key = {
+        (snapshot.family, snapshot.condition): snapshot
+        for snapshot in direct_snapshots
+    }
     for snapshot in fallback_snapshots:
         # Fallback fills missing price rows only. Direct BUFF snapshots keep
         # richer live listing/buy-order data when both sources find a skin.
@@ -1295,7 +1387,10 @@ def run(migrate_only: bool = False) -> None:
             )
         direct_count = len(snapshots)
         snapshots = merge_direct_and_fallback_snapshots(snapshots, fallback_snapshots)
-        print(f"Fallback merge: direct={direct_count}, " f"fallback={len(fallback_snapshots)}, final={len(snapshots)}.")
+        print(
+            f"Fallback merge: direct={direct_count}, "
+            f"fallback={len(fallback_snapshots)}, final={len(snapshots)}."
+        )
         if enable_sqlite and sqlite_path and not write_sheets:
             sqlite_write_snapshots(sqlite_path, fallback_snapshots, timestamp)
 
