@@ -23,6 +23,7 @@ from src.scraper import BuffPriceClient, csgotrader_snapshots
 from src.data_loader import SheetStore, load_history_frame, sqlite_load_history_frame
 from app_data_utils import (
     choose_image_url,
+    filter_fallback_overrides_same_day,
     filter_high_value_families,
     load_app_frames,
     prepare_history_frame,
@@ -88,6 +89,7 @@ def merge_fallback_history(history: pd.DataFrame) -> pd.DataFrame:
             fallback["Buy Orders"].fillna(0) > 0, fallback["_Hist Buy Orders"]
         )
         fallback = fallback.drop(columns=["_Hist Listings", "_Hist Buy Orders"])
+    fallback = filter_fallback_overrides_same_day(history, fallback)
     fallback["_Fallback Current"] = 1
     history["_Fallback Current"] = 0
     merged = pd.concat([history, fallback], ignore_index=True)

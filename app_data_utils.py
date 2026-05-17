@@ -77,3 +77,36 @@ def choose_image_url(variant_df: pd.DataFrame) -> str:
         if not non_empty.empty:
             return str(non_empty.iloc[-1])
     return ""
+
+
+def filter_fallback_overrides_same_day(history: pd.DataFrame, fallback: pd.DataFrame) -> pd.DataFrame:
+    """Drop fallback rows when direct history already has same-day data.
+
+    This prevents fallback listing values from overriding fresh BUFF listings
+    for the same Family+Condition on the same date.
+    """
+    if history.empty or fallback.empty:
+        return fallback.copy()
+
+    required_cols = {"Timestamp", "Family", "Condition"}
+    if not required_cols.issubset(history.columns) or not required_cols.issubset(fallback.columns):
+        return fallback.copy()
+
+    hist = history.copy()
+    fb = fallback.copy()
+    hist["Timestamp"] = pd.to_datetime(hist["Timestamp"], errors="coerce", utc=True)
+    fb["Timestamp"] = pd.to_datetime(fb["Timestamp"], errors="coerce", utc=True)
+    hist = hist.dropna(subset=["Timestamp"])
+    fb = fb.dropna(subset=["Timestamp"])
+    if hist.empty or fb.empty:
+        return fb
+
+    hist["__day"] = hist["Timestamp"].dt.strftime("%Y-%m-%d")
+    fb["__day"] = fb["Timestamp"].dt.strftime("%Y-%m-%d")
+
+    existing = set(zip(hist["Family"].astype(str), hist["Condition"].astype(str), hist["__day"].astype(str)))
+    mask = [
+        (str(fam), str(cond), str(day)) not in existing
+        for fam, cond, day in zip(fb["Family"], fb["Condition"], fb["__day"])
+    ]
+    return fb.loc[mask].drop(columns=["__day"])
