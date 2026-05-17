@@ -7,8 +7,8 @@ import os
 import re
 import sqlite3
 import time
+from datetime import UTC, datetime
 from http.cookies import SimpleCookie
-from datetime import datetime, timezone
 from pathlib import Path
 from statistics import mean, pstdev
 from typing import Any
@@ -56,6 +56,7 @@ from market_utils import (
 
 # Note: `src/` modules provide thin re-export wrappers for cleaner imports in
 # UI and future modularization without changing tracker runtime behavior here.
+
 
 class BuffPriceClient:
     SELL_ORDER_URL = "https://buff.163.com/api/market/goods/sell_order"
@@ -115,7 +116,9 @@ class BuffPriceClient:
             time.sleep(backoff_seconds)
         return response
 
-    def fetch_sell_snapshot(self, goods_id: str, page_meta: dict[str, Any] | None = None) -> MarketSnapshot:
+    def fetch_sell_snapshot(
+        self, goods_id: str, page_meta: dict[str, Any] | None = None
+    ) -> MarketSnapshot:
         response = self._get(
             self.SELL_ORDER_URL,
             params={
@@ -144,7 +147,9 @@ class BuffPriceClient:
         return MarketSnapshot(
             goods_id=str(goods_id),
             family=family,
-            skin_name=f"{family} ({condition})" if condition and condition not in family else family,
+            skin_name=(
+                f"{family} ({condition})" if condition and condition not in family else family
+            ),
             condition=condition or "Unknown",
             price=float(items[0]["price"]),
             listings=int(page_meta.get("sell_num") or data.get("total_count") or len(items)),
@@ -169,7 +174,9 @@ class BuffPriceClient:
         response.raise_for_status()
         page = response.text
 
-        goods_info_match = re.search(r"var goods_info = (\{.*?\})\s*market_show\.pre_init", page, re.DOTALL)
+        goods_info_match = re.search(
+            r"var goods_info = (\{.*?\})\s*market_show\.pre_init", page, re.DOTALL
+        )
         page_info: dict[str, Any] = {}
         if goods_info_match:
             page_info = json.loads(goods_info_match.group(1))
@@ -224,7 +231,9 @@ class BuffPriceClient:
                 snapshots[goods_id] = snapshot
             time.sleep(0.35)
 
-        return sorted(snapshots.values(), key=lambda item: (item.family, item.condition, item.goods_id))
+        return sorted(
+            snapshots.values(), key=lambda item: (item.family, item.condition, item.goods_id)
+        )
 
     def discover_high_value_catalog(
         self,
@@ -260,7 +269,10 @@ class BuffPriceClient:
         queue = sorted(set(queue))
 
         seen: set[str] = set()
-        keyword_lower = tuple(keyword.lower() for keyword in (match_keywords or keywords))
+        raw_keywords = match_keywords or [
+            value if isinstance(value, str) else value[0] for value in keywords
+        ]
+        keyword_lower = tuple(keyword.lower() for keyword in raw_keywords)
 
         while queue:
             if max_goods is not None and len(seen) >= max_goods:
@@ -287,7 +299,9 @@ class BuffPriceClient:
                 continue
 
             family_lower = snapshot.family.lower()
-            if snapshot.price >= min_price and any(keyword in family_lower for keyword in keyword_lower):
+            if snapshot.price >= min_price and any(
+                keyword in family_lower for keyword in keyword_lower
+            ):
                 snapshots[goods_id] = snapshot
                 if on_snapshot is not None:
                     on_snapshot(snapshot)
@@ -313,18 +327,26 @@ class BuffPriceClient:
         if not market_hash_name:
             return None
         family, condition = split_market_name(market_hash_name)
-        price = try_float(item.get("sell_min_price") or item.get("quick_price") or item.get("sell_reference_price"))
+        price = try_float(
+            item.get("sell_min_price")
+            or item.get("quick_price")
+            or item.get("sell_reference_price")
+        )
         if price is None:
             return None
         return MarketSnapshot(
             goods_id=str(goods_id),
             family=family,
-            skin_name=f"{family} ({condition})" if condition and condition not in family else family,
+            skin_name=(
+                f"{family} ({condition})" if condition and condition not in family else family
+            ),
             condition=condition or "Unknown",
             price=price,
             listings=int(try_float(item.get("sell_num")) or 0),
             buy_orders=int(try_float(item.get("buy_num")) or 0),
-            reference_price=try_float(item.get("sell_reference_price") or info.get("steam_price_cny")),
+            reference_price=try_float(
+                item.get("sell_reference_price") or info.get("steam_price_cny")
+            ),
             image_url=normalize_image_url(
                 info.get("original_icon_url")
                 or info.get("icon_url")
@@ -398,12 +420,19 @@ class BuffPriceClient:
         queue = [str(goods_id) for goods_id in (seed_goods_ids or []) if str(goods_id).strip()]
         for query in keywords:
             keyword, category = query if isinstance(query, tuple) else (query, None)
-            queue.extend(self.discover_goods_ids_from_market(keyword=keyword, category=category, max_pages=max_pages_per_keyword))
+            queue.extend(
+                self.discover_goods_ids_from_market(
+                    keyword=keyword, category=category, max_pages=max_pages_per_keyword
+                )
+            )
         queue = sorted(set(queue))
 
         seen: set[str] = set()
         snapshots: dict[str, MarketSnapshot] = {}
-        keyword_lower = tuple(keyword.lower() for keyword in (match_keywords or keywords))
+        raw_keywords = match_keywords or [
+            value if isinstance(value, str) else value[0] for value in keywords
+        ]
+        keyword_lower = tuple(keyword.lower() for keyword in raw_keywords)
 
         while queue:
             goods_id = queue.pop(0)
@@ -514,7 +543,7 @@ class SheetStore:
         try:
             sheet = self.spreadsheet.worksheet(title)
         except gspread.WorksheetNotFound:
-            sheet = self.spreadsheet.add_worksheet(title=title, rows=str(rows), cols=str(cols))
+            sheet = self.spreadsheet.add_worksheet(title=title, rows=rows, cols=cols)
             sheet.append_row(headers)
         return sheet
 
@@ -531,8 +560,7 @@ def sqlite_connect(db_path: str) -> sqlite3.Connection:
 
 
 def sqlite_init(conn: sqlite3.Connection) -> None:
-    conn.executescript(
-        """
+    conn.executescript("""
         CREATE TABLE IF NOT EXISTS goods (
             goods_id TEXT PRIMARY KEY,
             family TEXT NOT NULL,
@@ -556,8 +584,7 @@ def sqlite_init(conn: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_snapshots_goods_ts ON snapshots(goods_id, ts);
         CREATE INDEX IF NOT EXISTS idx_snapshots_ts ON snapshots(ts);
-        """
-    )
+        """)
     goods_cols = {row[1] for row in conn.execute("PRAGMA table_info(goods);")}
     if "reference_price" not in goods_cols:
         conn.execute("ALTER TABLE goods ADD COLUMN reference_price REAL;")
@@ -667,10 +694,14 @@ class PriceAnalysisAgent:
     def __init__(self, history: pd.DataFrame) -> None:
         self.history = history.copy()
         if not self.history.empty:
-            self.history["Timestamp"] = pd.to_datetime(self.history["Timestamp"], errors="coerce", utc=True)
+            self.history["Timestamp"] = pd.to_datetime(
+                self.history["Timestamp"], errors="coerce", utc=True
+            )
             self.history["Price"] = pd.to_numeric(self.history["Price"], errors="coerce")
             self.history["Listings"] = pd.to_numeric(self.history["Listings"], errors="coerce")
-            self.history = self.history.dropna(subset=["Timestamp", "Skin Name", "Price", "Listings"])
+            self.history = self.history.dropna(
+                subset=["Timestamp", "Skin Name", "Price", "Listings"]
+            )
 
     def summarize_skin(self, skin_name: str) -> dict[str, Any] | None:
         skin_history = self.history[self.history["Skin Name"] == skin_name].sort_values("Timestamp")
@@ -686,10 +717,14 @@ class PriceAnalysisAgent:
         max_price = max(prices)
         price_stddev = pstdev(prices) if len(prices) > 1 else 0.0
         volatility_pct = (price_stddev / avg_price * 100) if avg_price else 0.0
-        price_change_pct = ((latest_price - baseline_price) / baseline_price * 100) if baseline_price else 0.0
+        price_change_pct = (
+            ((latest_price - baseline_price) / baseline_price * 100) if baseline_price else 0.0
+        )
         listing_avg = mean(listings)
         latest_listings = listings[-1]
-        listing_pressure_pct = ((latest_listings - listing_avg) / listing_avg * 100) if listing_avg else 0.0
+        listing_pressure_pct = (
+            ((latest_listings - listing_avg) / listing_avg * 100) if listing_avg else 0.0
+        )
 
         signal, confidence, rationale = self._classify(
             latest_price=latest_price,
@@ -732,13 +767,21 @@ class PriceAnalysisAgent:
         overvalued = latest_price > avg_price * 1.03
         listing_spike = latest_listings > listing_avg * 1.1 if listing_avg else False
         listing_drop = latest_listings < listing_avg * 0.9 if listing_avg else False
-        near_floor = math.isclose(latest_price, min_price, rel_tol=0.01) or latest_price <= min_price * 1.03
-        near_ceiling = math.isclose(latest_price, max_price, rel_tol=0.01) or latest_price >= max_price * 0.97
+        near_floor = (
+            math.isclose(latest_price, min_price, rel_tol=0.01) or latest_price <= min_price * 1.03
+        )
+        near_ceiling = (
+            math.isclose(latest_price, max_price, rel_tol=0.01) or latest_price >= max_price * 0.97
+        )
 
         if undervalued and listing_spike:
             return ("BUY_WATCH", 0.79, "Price is below its average while stock is elevated.")
         if overvalued and listing_drop:
-            return ("SELL_WATCH", 0.76, "Price is above its average while sell-side stock is tightening.")
+            return (
+                "SELL_WATCH",
+                0.76,
+                "Price is above its average while sell-side stock is tightening.",
+            )
         if near_floor:
             return ("ACCUMULATE", 0.67, "Price is near the observed floor for this condition.")
         if near_ceiling:
@@ -903,7 +946,9 @@ def migrate_history_sheet(store: SheetStore) -> int:
     normalized = normalize_history_values(raw_values)
     if not normalized.empty:
         normalized["Timestamp"] = pd.to_datetime(normalized["Timestamp"], errors="coerce", utc=True)
-        normalized = normalized.sort_values(["Timestamp", "Goods ID", "Price", "Listings"], na_position="last")
+        normalized = normalized.sort_values(
+            ["Timestamp", "Goods ID", "Price", "Listings"], na_position="last"
+        )
         normalized = normalized.drop_duplicates(
             subset=["Timestamp", "Goods ID", "Family", "Condition", "Price", "Listings"],
             keep="last",
@@ -1125,7 +1170,9 @@ def rebuild_forecast(store: SheetStore, history: pd.DataFrame) -> None:
                 continue
 
         future_dates = pd.date_range(daily.index.max() + pd.Timedelta(days=1), periods=7, freq="D")
-        for forecast_date, predicted_price, predicted_listings in zip(future_dates, price_forecast, listings_forecast):
+        for forecast_date, predicted_price, predicted_listings in zip(
+            future_dates, price_forecast, listings_forecast
+        ):
             forecast_rows.append(
                 [
                     skin_name,
@@ -1198,25 +1245,31 @@ def csgotrader_snapshots(track_keywords: list[str], min_price_cny: float) -> lis
                 image_url = image_url or steam_image_url(str(market_hash_name), image_cache)
             except Exception as exc:
                 print(f"Failed Steam image {market_hash_name}: {exc}")
+        reference_price_usd = try_float((highest_order or {}).get("price"))
         snapshots.append(
             MarketSnapshot(
                 goods_id=source_id("csgotrader", market_hash_name),
                 family=family,
-                skin_name=f"{family} ({condition})" if condition and condition not in family else family,
+                skin_name=(
+                    f"{family} ({condition})" if condition and condition not in family else family
+                ),
                 condition=condition or "Unknown",
                 price=price,
                 listings=0,
                 buy_orders=0,
-                reference_price=try_float((highest_order or {}).get("price")) * usd_to_cny
-                if try_float((highest_order or {}).get("price")) is not None
-                else None,
+                reference_price=(
+                    reference_price_usd * usd_to_cny if reference_price_usd is not None else None
+                ),
                 image_url=image_url,
                 observed_orders=0,
             )
         )
     if fill_images:
         save_json_file(STEAM_IMAGE_CACHE_PATH, image_cache)
-    return sorted(snapshots, key=lambda item: (item.family, CONDITION_ORDER.get(item.condition, 50), item.goods_id))
+    return sorted(
+        snapshots,
+        key=lambda item: (item.family, CONDITION_ORDER.get(item.condition, 50), item.goods_id),
+    )
 
 
 def merge_direct_and_fallback_snapshots(
@@ -1230,8 +1283,7 @@ def merge_direct_and_fallback_snapshots(
     not find during that scheduled run.
     """
     snapshots_by_market_key = {
-        (snapshot.family, snapshot.condition): snapshot
-        for snapshot in direct_snapshots
+        (snapshot.family, snapshot.condition): snapshot for snapshot in direct_snapshots
     }
     for snapshot in fallback_snapshots:
         # Fallback fills missing price rows only. Direct BUFF snapshots keep
@@ -1283,10 +1335,20 @@ def merge_snapshots_with_full_catalog(
             condition=snapshot.condition,
             price=snapshot.price,
             listings=full_snapshot.listings if full_snapshot.listings > 0 else snapshot.listings,
-            buy_orders=full_snapshot.buy_orders if full_snapshot.buy_orders > 0 else snapshot.buy_orders,
-            reference_price=full_snapshot.reference_price if full_snapshot.reference_price is not None else snapshot.reference_price,
+            buy_orders=(
+                full_snapshot.buy_orders if full_snapshot.buy_orders > 0 else snapshot.buy_orders
+            ),
+            reference_price=(
+                full_snapshot.reference_price
+                if full_snapshot.reference_price is not None
+                else snapshot.reference_price
+            ),
             image_url=full_snapshot.image_url or snapshot.image_url,
-            observed_orders=full_snapshot.observed_orders if full_snapshot.observed_orders > 0 else snapshot.observed_orders,
+            observed_orders=(
+                full_snapshot.observed_orders
+                if full_snapshot.observed_orders > 0
+                else snapshot.observed_orders
+            ),
         )
 
     for snapshot in full_snapshots:
@@ -1322,7 +1384,9 @@ def enrich_fallback_snapshots_with_latest_depth(
     frame["Condition"] = frame["Condition"].fillna("Unknown").astype(str)
     frame["Listings"] = pd.to_numeric(frame["Listings"], errors="coerce")
     frame["Buy Orders"] = pd.to_numeric(frame.get("Buy Orders"), errors="coerce").fillna(0)
-    frame = frame.dropna(subset=["Timestamp", "Family", "Condition", "Listings"]).sort_values("Timestamp")
+    frame = frame.dropna(subset=["Timestamp", "Family", "Condition", "Listings"]).sort_values(
+        "Timestamp"
+    )
     if frame.empty:
         return snapshots, 0
 
@@ -1377,7 +1441,11 @@ def run(migrate_only: bool = False) -> None:
     sqlite_path = os.getenv("BUFF_SQLITE_PATH", DEFAULT_SQLITE_PATH).strip()
     enable_sqlite = env_flag("BUFF_WRITE_SQLITE", False)
     write_sheets = env_flag("BUFF_WRITE_SHEETS", not enable_sqlite)
-    store = SheetStore(SHEET_NAME) if write_sheets or migrate_only or env_flag("BUFF_RUN_MIGRATION", False) else None
+    store = (
+        SheetStore(SHEET_NAME)
+        if write_sheets or migrate_only or env_flag("BUFF_RUN_MIGRATION", False)
+        else None
+    )
     run_migration = migrate_only or env_flag("BUFF_RUN_MIGRATION", False)
     if run_migration:
         if store is None:
@@ -1388,22 +1456,26 @@ def run(migrate_only: bool = False) -> None:
     else:
         print("Skipping migration for this run (BUFF_RUN_MIGRATION is disabled).")
 
-    history = load_history_frame(store) if store is not None else sqlite_load_history_frame(sqlite_path)
+    history = (
+        load_history_frame(store) if store is not None else sqlite_load_history_frame(sqlite_path)
+    )
     if migrate_only:
         agent = PriceAnalysisAgent(history)
         tracked_names = sorted(history["Skin Name"].dropna().unique().tolist())
-        analysis_rows = [summary for name in tracked_names if (summary := agent.summarize_skin(name))]
+        analysis_rows = [
+            summary for name in tracked_names if (summary := agent.summarize_skin(name))
+        ]
         if store is None:
             raise ValueError("Migration-only run requires Google Sheets.")
         rebuild_dashboard(store, analysis_rows)
-        rebuild_signals(store, analysis_rows, datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"))
+        rebuild_signals(store, analysis_rows, datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"))
         if env_flag("BUFF_ENABLE_FORECAST", True):
             rebuild_forecast(store, history)
         print("Migration-only run completed.")
         return
 
     client = BuffPriceClient()
-    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
     min_price = float(os.getenv("BUFF_MIN_PRICE_CNY", "0"))
     try:
         high_value_pages = max(1, int(os.getenv("BUFF_HIGH_VALUE_PAGES", "25")))
@@ -1430,7 +1502,9 @@ def run(migrate_only: bool = False) -> None:
         )
     if env_flag("BUFF_FALLBACK_CSGOTRADER", False):
         fallback_snapshots = csgotrader_snapshots(track_keywords, min_price)
-        fallback_snapshots, backfilled_rows = enrich_fallback_snapshots_with_latest_depth(fallback_snapshots, history)
+        fallback_snapshots, backfilled_rows = enrich_fallback_snapshots_with_latest_depth(
+            fallback_snapshots, history
+        )
         if backfilled_rows:
             print(f"Fallback depth backfill: {backfilled_rows} rows reused latest listing depth.")
         min_fallback_snapshots = int(os.getenv("BUFF_MIN_FALLBACK_SNAPSHOTS", "0") or "0")
@@ -1450,7 +1524,12 @@ def run(migrate_only: bool = False) -> None:
         if enable_sqlite and sqlite_path and not write_sheets:
             sqlite_write_snapshots(sqlite_path, fallback_snapshots, timestamp)
 
-    full_catalog_enabled = os.getenv("BUFF_FULL_CATALOG", "").strip().lower() in {"1", "true", "yes", "on"}
+    full_catalog_enabled = os.getenv("BUFF_FULL_CATALOG", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
     if full_catalog_enabled:
         max_pages = int(os.getenv("BUFF_FULL_CATALOG_PAGES", "60"))
         full_snapshots = client.discover_full_catalog(
@@ -1460,7 +1539,8 @@ def run(migrate_only: bool = False) -> None:
             match_keywords=track_keywords,
         )
         snapshots = merge_snapshots_with_full_catalog(snapshots, full_snapshots)
-        rebuild_all_catalog(store, full_snapshots, timestamp)
+        if store is not None:
+            rebuild_all_catalog(store, full_snapshots, timestamp)
 
     if enable_sqlite and sqlite_path and write_sheets:
         sqlite_write_snapshots(sqlite_path, snapshots, timestamp)
