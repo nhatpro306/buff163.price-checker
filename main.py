@@ -54,6 +54,8 @@ from market_utils import (
     try_float,
 )
 
+# Note: `src/` modules provide thin re-export wrappers for cleaner imports in
+# UI and future modularization without changing tracker runtime behavior here.
 
 class BuffPriceClient:
     SELL_ORDER_URL = "https://buff.163.com/api/market/goods/sell_order"
