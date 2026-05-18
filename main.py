@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 import time  # noqa: F401
 
 from market_config import ALL_CATALOG_HEADERS as ALL_CATALOG_HEADERS
@@ -13,19 +12,22 @@ from market_config import DEFAULT_TRACK_KEYWORDS as DEFAULT_TRACK_KEYWORDS
 from market_config import FORECAST_SHEET_NAME as FORECAST_SHEET_NAME
 from market_config import SHEET_NAME as SHEET_NAME
 from src.analysis import PriceAnalysisAgent as PriceAnalysisAgent
+from src.cli import main as cli_main
 from src.client import BuffPriceClient as BuffPriceClient
 from src.etl import normalize_history_values as normalize_history_values
 from src.etl import parse_family_and_condition as parse_family_and_condition
-from src.orchestrator import (
+from src.orchestrator import run as run
+from src.settings import get_search_keywords as get_search_keywords
+from src.settings import get_seed_goods_ids as get_seed_goods_ids
+from src.snapshot_merge import (
     enrich_fallback_snapshots_with_latest_depth as enrich_fallback_snapshots_with_latest_depth,
 )
-from src.orchestrator import get_search_keywords as get_search_keywords
-from src.orchestrator import get_seed_goods_ids as get_seed_goods_ids
-from src.orchestrator import (
+from src.snapshot_merge import (
     merge_direct_and_fallback_snapshots as merge_direct_and_fallback_snapshots,
 )
-from src.orchestrator import merge_snapshots_with_full_catalog as merge_snapshots_with_full_catalog
-from src.orchestrator import run as run
+from src.snapshot_merge import (
+    merge_snapshots_with_full_catalog as merge_snapshots_with_full_catalog,
+)
 from src.storage import SheetStore as SheetStore
 from src.storage import append_history as append_history
 from src.storage import csgotrader_snapshots as csgotrader_snapshots
@@ -75,19 +77,4 @@ __all__ = [
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--migrate-only", action="store_true")
-    args = parser.parse_args()
-    try:
-        run(migrate_only=args.migrate_only)
-    except FileNotFoundError as exc:
-        print(f"Startup error: {exc}")
-        print(
-            "Provide Google credentials via `GSHEET_CREDS_JSON` or place `credentials.json` "
-            "in the project root. For local SQLite-only viewing, use Streamlit with "
-            "`BUFF_READ_SQLITE=1` and `BUFF_SQLITE_PATH`."
-        )
-        raise SystemExit(1)
-    except Exception as exc:
-        print(f"Unhandled error: {exc.__class__.__name__}: {exc}")
-        raise SystemExit(1)
+    cli_main()
