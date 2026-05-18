@@ -74,7 +74,9 @@ def discover_high_value_catalog(
                 break
         if max_goods is not None and len(snapshots) >= max_goods:
             break
-        queue.extend(discover_goods_ids_from_market(client, keyword=keyword, category=category, max_pages=0))
+        queue.extend(
+            discover_goods_ids_from_market(client, keyword=keyword, category=category, max_pages=0)
+        )
     queue = sorted(set(queue))
 
     seen: set[str] = set()
@@ -108,7 +110,9 @@ def discover_high_value_catalog(
             continue
 
         family_lower = snapshot.family.lower()
-        if snapshot.price >= min_price and any(keyword in family_lower for keyword in keyword_lower):
+        if snapshot.price >= min_price and any(
+            keyword in family_lower for keyword in keyword_lower
+        ):
             snapshots[goods_id] = snapshot
             if on_snapshot is not None:
                 on_snapshot(snapshot)

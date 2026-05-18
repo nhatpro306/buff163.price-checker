@@ -56,9 +56,7 @@ def build_market_item_snapshot(item: dict[str, Any]) -> MarketSnapshot | None:
 
     family, condition = split_market_name(market_hash_name)
     price = try_float(
-        item.get("sell_min_price")
-        or item.get("quick_price")
-        or item.get("sell_reference_price")
+        item.get("sell_min_price") or item.get("quick_price") or item.get("sell_reference_price")
     )
     if price is None:
         return None
