@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from typing import Any, cast
 
 import altair as alt
 import pandas as pd
@@ -684,23 +685,23 @@ variant_df = (
 latest = variant_df.iloc[-1]
 image_url = choose_image_url(variant_df)
 reference_price = (
-    float(latest["Reference Price"])
+    float(cast(Any, latest["Reference Price"]))
     if pd.notna(latest["Reference Price"])
-    else float(latest["Price"])
+    else float(cast(Any, latest["Price"]))
 )
-buy_orders = int(latest["Buy Orders"]) if pd.notna(latest["Buy Orders"]) else 0
-sell_stock = int(latest["Listings"]) if pd.notna(latest["Listings"]) else 0
+buy_orders = int(cast(Any, latest["Buy Orders"])) if pd.notna(latest["Buy Orders"]) else 0
+sell_stock = int(cast(Any, latest["Listings"])) if pd.notna(latest["Listings"]) else 0
 knife_category = family_selected.split("|")[0].strip()
 goods_id = str(latest.get("Goods ID") or "N/A")
 live_listing: dict[str, object] = {}
 if os.getenv("BUFF_APP_LIVE_LISTINGS", "1").strip().lower() in {"1", "true", "yes", "on"}:
     live_listing = live_buff_listing(family_selected, condition_selected, knife_category)
     if live_listing.get("status") == "live":
-        sell_stock = int(live_listing.get("listings") or 0)
-        buy_orders = int(live_listing.get("buy_orders") or 0)
+        sell_stock = int(cast(Any, live_listing.get("listings") or 0))
+        buy_orders = int(cast(Any, live_listing.get("buy_orders") or 0))
         goods_id = str(live_listing.get("goods_id") or goods_id)
         if live_listing.get("reference_price") is not None:
-            reference_price = float(live_listing["reference_price"])
+            reference_price = float(cast(Any, live_listing["reference_price"]))
         image_url = str(live_listing.get("image_url") or image_url)
 listing_source = "BUFF" if sell_stock > 0 else "BUFF unavailable"
 
@@ -993,16 +994,18 @@ with tab4:
     if all_catalog_df.empty:
         st.info("Full catalog not loaded yet. Click 'Load Full Catalog'.")
     else:
-        for col in ("Price", "Listings", "Buy Orders", "Reference Price"):
-            if col in all_catalog_df.columns:
-                all_catalog_df[col] = pd.to_numeric(all_catalog_df[col], errors="coerce")
+        for numeric_col in ("Price", "Listings", "Buy Orders", "Reference Price"):
+            if numeric_col in all_catalog_df.columns:
+                all_catalog_df[numeric_col] = pd.to_numeric(
+                    all_catalog_df[numeric_col], errors="coerce"
+                )
         all_catalog_df["Family"] = all_catalog_df.get("Family", "").fillna("").astype(str)
         scoped = (
             all_catalog_df[all_catalog_df["Family"] == family_selected].copy()
             if family_selected
             else all_catalog_df.copy()
         )
-        cols = [
+        catalog_cols = [
             c
             for c in (
                 "Timestamp",
@@ -1019,7 +1022,7 @@ with tab4:
             if c in scoped.columns
         ]
         st.dataframe(
-            scoped[cols].sort_values(["Price"], ascending=False, na_position="last"),
+            scoped[catalog_cols].sort_values(["Price"], ascending=False, na_position="last"),
             width="stretch",
             hide_index=True,
         )
