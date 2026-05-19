@@ -6,9 +6,9 @@ from typing import Any
 import httpx
 
 from market_models import MarketSnapshot
+from market_utils import debug_log
 from src.buff_http import buff_headers, max_429_attempts, request_timeout
 from src.snapshots import build_sell_order_snapshot
-from market_utils import debug_log
 
 
 class AsyncBuffPriceClient:

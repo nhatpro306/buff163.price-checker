@@ -40,6 +40,7 @@ st_autorefresh(interval=max(30, REFRESH_SECONDS) * 1000, key="buff_refresh")
 
 TRACK_KEYWORDS = tuple(DEFAULT_TRACK_KEYWORDS)
 HIGH_VALUE_MIN_PRICE = float(os.getenv("BUFF_MIN_PRICE_CNY", "0"))
+CHART_BACKGROUND = "#111a28"
 
 
 def fallback_history_frame() -> pd.DataFrame:
@@ -251,7 +252,9 @@ def price_delta(frame: pd.DataFrame) -> tuple[float | None, float | None]:
     return last - first, ((last - first) / first) * 100
 
 
-def render_kpis(frame: pd.DataFrame, sell_stock: int, buy_orders: int, reference_price: float) -> None:
+def render_kpis(
+    frame: pd.DataFrame, sell_stock: int, buy_orders: int, reference_price: float
+) -> None:
     prices = pd.to_numeric(frame.get("Price"), errors="coerce").dropna()
     latest_price = prices.iloc[-1] if not prices.empty else pd.NA
     change_abs, change_pct = price_delta(frame)
@@ -270,7 +273,7 @@ def render_kpis(frame: pd.DataFrame, sell_stock: int, buy_orders: int, reference
     ]
     for start in (0, 4):
         cols = st.columns(4)
-        for col, (label, value, item_delta) in zip(cols, rows[start:start + 4]):
+        for col, (label, value, item_delta) in zip(cols, rows[start : start + 4]):
             col.metric(label, value, delta=item_delta)
 
 
@@ -295,6 +298,15 @@ def format_market_table(frame: pd.DataFrame) -> pd.io.formats.style.Styler:
         }
     )
     return visible.style.format(formatters, na_rep="N/A")
+
+
+def chart_surface(
+    chart: alt.Chart | alt.LayerChart | alt.VConcatChart,
+) -> alt.Chart | alt.LayerChart | alt.VConcatChart:
+    return chart.configure(background=CHART_BACKGROUND).configure_view(
+        fill=CHART_BACKGROUND,
+        stroke="transparent",
+    )
 
 
 def inject_styles() -> None:
@@ -874,9 +886,13 @@ with st.sidebar:
     elif sort_option == "Latest price low-high":
         filtered_families = latest_family.sort_values("Price", ascending=True)["Family"].tolist()
     elif sort_option == "Listings high-low":
-        filtered_families = latest_family.sort_values("Listings", ascending=False)["Family"].tolist()
+        filtered_families = latest_family.sort_values("Listings", ascending=False)[
+            "Family"
+        ].tolist()
 
-    family_selected = st.selectbox("Skin family", filtered_families, placeholder=f"{selected_knife_type} skins")
+    family_selected = st.selectbox(
+        "Skin family", filtered_families, placeholder=f"{selected_knife_type} skins"
+    )
 
 family_df = history_df[history_df["Family"] == family_selected].copy()
 
@@ -907,7 +923,9 @@ with st.sidebar:
     selected_condition_label = st.selectbox("Condition", condition_labels)
     min_day = family_df["Timestamp"].min().date()
     max_day = family_df["Timestamp"].max().date()
-    date_range = st.date_input("Date range", (min_day, max_day), min_value=min_day, max_value=max_day)
+    date_range = st.date_input(
+        "Date range", (min_day, max_day), min_value=min_day, max_value=max_day
+    )
     if st.button("Refresh data", width="stretch"):
         st.cache_data.clear()
         st.rerun()
@@ -928,10 +946,15 @@ if isinstance(date_range, tuple) and len(date_range) == 2:
     start_day, end_day = date_range
 else:
     start_day = end_day = date_range
-range_mask = (variant_df["Timestamp"].dt.date >= start_day) & (variant_df["Timestamp"].dt.date <= end_day)
+range_mask = (variant_df["Timestamp"].dt.date >= start_day) & (
+    variant_df["Timestamp"].dt.date <= end_day
+)
 analysis_df = variant_df[range_mask].copy()
 if analysis_df.empty:
-    empty_state("No rows in the selected date range", "Showing the full available history for this condition instead.")
+    empty_state(
+        "No rows in the selected date range",
+        "Showing the full available history for this condition instead.",
+    )
     analysis_df = variant_df.copy()
 debug_log(
     "ui selection "
@@ -968,7 +991,15 @@ if os.getenv("BUFF_APP_LIVE_LISTINGS", "1").strip().lower() in {"1", "true", "ye
             reference_price = float(cast(Any, live_listing["reference_price"]))
         image_url = str(live_listing.get("image_url") or image_url)
 listing_source = "BUFF" if sell_stock > 0 else "BUFF unavailable"
-live_status = str(live_listing.get("status") or ("disabled" if not os.getenv("BUFF_APP_LIVE_LISTINGS", "1").strip().lower() in {"1", "true", "yes", "on"} else "not checked"))
+live_status = str(
+    live_listing.get("status")
+    or (
+        "disabled"
+        if os.getenv("BUFF_APP_LIVE_LISTINGS", "1").strip().lower()
+        not in {"1", "true", "yes", "on"}
+        else "not checked"
+    )
+)
 live_checked = str(live_listing.get("checked_at") or "N/A")
 status_class = "" if live_status == "live" else " buff-status-warn"
 last_update = latest["Timestamp"].strftime("%Y-%m-%d %H:%M UTC")
@@ -1030,7 +1061,11 @@ price_chart = (
     .mark_line(color="#f0a23b", interpolate="monotone", strokeWidth=3)
     .encode(
         x=alt.X("Day:T", title="Date", axis=alt.Axis(labelColor="#9eabc0", titleColor="#c6cfdd")),
-        y=alt.Y("Price:Q", title="Price (CNY)", axis=alt.Axis(labelColor="#9eabc0", titleColor="#c6cfdd")),
+        y=alt.Y(
+            "Price:Q",
+            title="Price (CNY)",
+            axis=alt.Axis(labelColor="#9eabc0", titleColor="#c6cfdd"),
+        ),
         tooltip=chart_tooltip,
     )
     .properties(height=320)
@@ -1041,15 +1076,23 @@ moving_average = (
     .encode(x="Day:T", y=alt.Y("Moving Average:Q", axis=None), tooltip=chart_tooltip)
 )
 extreme_points = alt.layer(
-    alt.Chart(high_point).mark_point(color="#ff6b6b", filled=True, size=90).encode(x="Day:T", y=alt.Y("Price:Q", axis=None), tooltip=chart_tooltip),
-    alt.Chart(low_point).mark_point(color="#6dd6ff", filled=True, size=90).encode(x="Day:T", y=alt.Y("Price:Q", axis=None), tooltip=chart_tooltip),
+    alt.Chart(high_point)
+    .mark_point(color="#ff6b6b", filled=True, size=90)
+    .encode(x="Day:T", y=alt.Y("Price:Q", axis=None), tooltip=chart_tooltip),
+    alt.Chart(low_point)
+    .mark_point(color="#6dd6ff", filled=True, size=90)
+    .encode(x="Day:T", y=alt.Y("Price:Q", axis=None), tooltip=chart_tooltip),
 )
 stock_chart = (
     alt.Chart(daily_df)
     .mark_area(color="#5f7bd0", opacity=0.28, interpolate="monotone")
     .encode(
         x=alt.X("Day:T", title="Date", axis=alt.Axis(labelColor="#9eabc0", titleColor="#c6cfdd")),
-        y=alt.Y("Listings:Q", title="Sell Stock", axis=alt.Axis(labelColor="#9eabc0", titleColor="#c6cfdd")),
+        y=alt.Y(
+            "Listings:Q",
+            title="Sell Stock",
+            axis=alt.Axis(labelColor="#9eabc0", titleColor="#c6cfdd"),
+        ),
         tooltip=chart_tooltip,
     )
     .properties(height=180)
@@ -1070,7 +1113,9 @@ stock_overlay = (
     .properties(height=320)
 )
 price_layers = alt.layer(price_chart, moving_average, extreme_points)
-combined_chart = alt.layer(price_chart, moving_average, extreme_points, stock_overlay).resolve_scale(y="independent")
+combined_chart = alt.layer(
+    price_chart, moving_average, extreme_points, stock_overlay
+).resolve_scale(y="independent")
 
 left, right = st.columns((2.2, 1))
 
@@ -1083,9 +1128,12 @@ with left:
         label_visibility="collapsed",
     )
     if chart_mode.startswith("Combined"):
-        st.altair_chart(combined_chart, width="stretch")
+        st.altair_chart(chart_surface(combined_chart), width="stretch")
     else:
-        st.altair_chart((price_layers & stock_chart).resolve_scale(x="shared"), width="stretch")
+        st.altair_chart(
+            chart_surface((price_layers & stock_chart).resolve_scale(x="shared")),
+            width="stretch",
+        )
 
 with right:
     summary = (
@@ -1113,9 +1161,7 @@ with tab1:
         sell_view["Listings"] = sell_view["Listings"].fillna(0).astype(int)
         sell_view["Buy Orders"] = sell_view["Buy Orders"].fillna(0).astype(int)
         sell_view["Observed Orders"] = (
-            pd.to_numeric(sell_view["Observed Orders"], errors="coerce")
-            .fillna(0)
-            .astype(int)
+            pd.to_numeric(sell_view["Observed Orders"], errors="coerce").fillna(0).astype(int)
         )
         st.dataframe(format_market_table(sell_view), width="stretch", hide_index=True)
 
@@ -1160,7 +1206,9 @@ with tab3:
         with st.spinner("Loading forecast..."):
             forecast_df = load_sheet_records(FORECAST_SHEET_NAME)
     if forecast_df.empty:
-        empty_state("Forecast sheet is empty", "Forecast rows will appear here after the forecast job runs.")
+        empty_state(
+            "Forecast sheet is empty", "Forecast rows will appear here after the forecast job runs."
+        )
     else:
         forecast_df["Forecast Date"] = pd.to_datetime(forecast_df["Forecast Date"], errors="coerce")
         forecast_df["Predicted Price"] = pd.to_numeric(
@@ -1173,7 +1221,10 @@ with tab3:
         target_skin_name = f"{family_selected} ({condition_selected})"
         forecast_view = forecast_df[forecast_df["Skin Name"] == target_skin_name].dropna()
         if forecast_view.empty:
-            empty_state("No forecast rows for this condition", "Choose another condition or refresh after forecasting completes.")
+            empty_state(
+                "No forecast rows for this condition",
+                "Choose another condition or refresh after forecasting completes.",
+            )
         else:
             if "Predicted Listings" in forecast_view.columns:
                 price_forecast = (
@@ -1193,7 +1244,13 @@ with tab3:
                 )
                 listings_forecast = (
                     alt.Chart(forecast_view)
-                    .mark_line(color="#5f7bd0", point=True, interpolate="monotone", strokeWidth=2.5, opacity=0.85)
+                    .mark_line(
+                        color="#5f7bd0",
+                        point=True,
+                        interpolate="monotone",
+                        strokeWidth=2.5,
+                        opacity=0.85,
+                    )
                     .encode(
                         x=alt.X("Forecast Date:T", title="Date"),
                         y=alt.Y(
@@ -1211,7 +1268,9 @@ with tab3:
                     .properties(height=320)
                 )
                 st.altair_chart(
-                    alt.layer(price_forecast, listings_forecast).resolve_scale(y="independent"),
+                    chart_surface(
+                        alt.layer(price_forecast, listings_forecast).resolve_scale(y="independent")
+                    ),
                     width="stretch",
                 )
                 show_cols = [
@@ -1235,7 +1294,7 @@ with tab3:
                     )
                     .properties(height=320)
                 )
-                st.altair_chart(forecast_chart, width="stretch")
+                st.altair_chart(chart_surface(forecast_chart), width="stretch")
 
 with tab4:
     section_title("Full Catalog", "On-demand catalog table")
@@ -1253,7 +1312,10 @@ with tab4:
             all_catalog_df = load_sheet_records(ALL_CATALOG_SHEET_NAME)
 
     if all_catalog_df.empty:
-        empty_state("Full catalog not loaded", "Click Load Full Catalog to fetch the larger sheet on demand.")
+        empty_state(
+            "Full catalog not loaded",
+            "Click Load Full Catalog to fetch the larger sheet on demand.",
+        )
     else:
         for numeric_col in ("Price", "Listings", "Buy Orders", "Reference Price"):
             if numeric_col in all_catalog_df.columns:
@@ -1282,9 +1344,7 @@ with tab4:
             )
             if c in scoped.columns
         ]
-        table = scoped[catalog_cols].sort_values(
-            ["Price"], ascending=False, na_position="last"
-        )
+        table = scoped[catalog_cols].sort_values(["Price"], ascending=False, na_position="last")
         if table.empty:
             empty_state(
                 "No full catalog rows for this family",
