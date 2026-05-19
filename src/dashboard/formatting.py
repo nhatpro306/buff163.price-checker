@@ -5,12 +5,14 @@ import html
 import pandas as pd
 import streamlit as st
 
-from src.dashboard.data_utils import choose_image_url
+from src.dashboard.frames import choose_image_url
 
 
 def base_knife_type(value: object) -> str:
-    return str(value or "").replace("StatTrak邃｢ ", "", 1).strip()
-
+    text = str(value or "").strip()
+    if text.startswith("StatTrak"):
+        return text.split(" ", 1)[1].strip() if " " in text else text
+    return text
 
 def knife_tile_image(frame: pd.DataFrame) -> str:
     priority = (

@@ -7,26 +7,26 @@ from typing import Any, cast
 import pandas as pd
 import streamlit as st
 
-from src.dashboard.config import (
+from src.dashboard.runtime import (
     HIGH_VALUE_MIN_PRICE,
     REFRESH_SECONDS,
     TRACK_KEYWORDS,
     configure_page,
 )
-from src.dashboard.data import (
+from src.dashboard.data_sources import (
     fallback_history_frame,
     live_buff_listing,
     load_history_records,
     load_sheet_records,
     merge_fallback_history,
 )
-from src.dashboard.data_utils import (
+from src.dashboard.frames import (
     choose_image_url,
     filter_high_value_families,
     load_app_frames,
     prepare_history_frame,
 )
-from src.dashboard.metrics import money, whole
+from src.dashboard.kpis import money, whole
 from src.dashboard.sections import (
     render_forecast,
     render_hero,
@@ -35,12 +35,12 @@ from src.dashboard.sections import (
     render_recent_listings,
     render_top_movers,
 )
-from src.dashboard.ui import (
+from src.dashboard.formatting import (
     base_knife_type,
     empty_state,
 )
-from src.dashboard.sidebar import render_sidebar
-from src.dashboard.styles import inject_styles
+from src.dashboard.filters import render_sidebar
+from src.dashboard.theme import inject_styles
 from main import (
     ALL_CATALOG_SHEET_NAME,
     CATALOG_SHEET_NAME,

@@ -2,7 +2,7 @@ import unittest
 
 import pandas as pd
 
-from src.dashboard.data_utils import filter_depthless_fallback_rows, filter_fallback_overrides_same_day
+from src.dashboard.frames import filter_depthless_fallback_rows, filter_fallback_overrides_same_day
 
 
 class FallbackListingMergeTests(unittest.TestCase):

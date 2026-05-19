@@ -44,15 +44,15 @@ The project has two user-facing entry points:
 |-- market_utils.py            # Shared parsing, env, JSON, and image helpers
 |-- src/
 |   |-- dashboard/
-|   |   |-- config.py          # Streamlit page setup and dashboard env constants
-|   |   |-- data.py            # Cached dashboard data and live-listing helpers
-|   |   |-- data_utils.py      # Dashboard frame loading and cleanup helpers
+|   |   |-- runtime.py         # Streamlit page setup and dashboard env constants
+|   |   |-- data_sources.py    # Cached dashboard data and live-listing helpers
+|   |   |-- frames.py          # Dashboard frame loading and cleanup helpers
 |   |   |-- charts.py          # Altair chart builders
-|   |   |-- metrics.py         # KPI, signal, and mover helpers
+|   |   |-- kpis.py            # KPI, signal, and mover helpers
 |   |   |-- sections.py        # Dashboard section renderers
-|   |   |-- sidebar.py         # Sidebar filters and selection state
-|   |   |-- styles.py          # Dashboard CSS
-|   |   `-- ui.py              # Shared UI formatting helpers
+|   |   |-- filters.py         # Sidebar filters and selection state
+|   |   |-- theme.py           # Dashboard CSS
+|   |   `-- formatting.py      # Shared UI formatting helpers
 |   |-- cli.py                 # argparse command-line entry point
 |   |-- orchestrator.py        # High-level tracker workflow
 |   |-- settings.py            # Environment-driven search settings
