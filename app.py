@@ -25,6 +25,13 @@ from app_metrics import (
     top_movers,
     whole,
 )
+from app_ui import (
+    base_knife_type,
+    empty_state,
+    format_market_table,
+    knife_tile_image,
+    section_title,
+)
 from main import (
     ALL_CATALOG_SHEET_NAME,
     CATALOG_HEADERS,
@@ -133,30 +140,6 @@ def merge_fallback_history(history: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
-def base_knife_type(value: object) -> str:
-    return str(value or "").replace("StatTrak™ ", "", 1).strip()
-
-
-def knife_tile_image(frame: pd.DataFrame) -> str:
-    priority = (
-        "Doppler",
-        "Gamma Doppler",
-        "Marble Fade",
-        "Fade",
-        "Tiger Tooth",
-        "Slaughter",
-        "Crimson Web",
-        "Case Hardened",
-    )
-    for finish in priority:
-        image_url = choose_image_url(
-            frame[frame["Family"].str.contains(finish, case=False, na=False)]
-        )
-        if image_url:
-            return image_url
-    return choose_image_url(frame.sort_values("Timestamp"))
-
-
 @st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
 def live_buff_listing(family: str, condition: str, knife_type: str) -> dict[str, object]:
     if not os.getenv("BUFF_COOKIE"):
@@ -220,81 +203,41 @@ def load_history_records() -> pd.DataFrame:
     return load_history_frame(get_store())
 
 
-def section_title(title: str, subtitle: str = "") -> None:
-    st.markdown(
-        f"""
-        <div class="buff-section-title">
-          <h3>{title}</h3>
-          {f'<span>{subtitle}</span>' if subtitle else ''}
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def empty_state(title: str, detail: str) -> None:
-    st.markdown(
-        f"""
-        <div class="buff-empty">
-          <strong>{title}</strong>
-          <span>{detail}</span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def format_market_table(frame: pd.DataFrame) -> pd.io.formats.style.Styler:
-    visible = frame.copy()
-    for col in ("Price", "Reference Price", "Predicted Price"):
-        if col in visible.columns:
-            visible[col] = pd.to_numeric(visible[col], errors="coerce")
-    for col in ("Listings", "Buy Orders", "Observed Orders", "Predicted Listings"):
-        if col in visible.columns:
-            visible[col] = pd.to_numeric(visible[col], errors="coerce")
-    formatters = {
-        col: "{:,.2f} CNY"
-        for col in ("Price", "Reference Price", "Predicted Price")
-        if col in visible.columns
-    }
-    formatters.update(
-        {
-            col: "{:,.0f}"
-            for col in ("Listings", "Buy Orders", "Observed Orders", "Predicted Listings")
-            if col in visible.columns
-        }
-    )
-    return visible.style.format(formatters, na_rep="N/A")
-
-
 def inject_styles() -> None:
     st.markdown(
         """
         <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
         :root {
-            --bg-top: #0d1422;
-            --bg-main: #172233;
-            --line: #2f3d56;
-            --accent: #5076c8;
-            --accent-2: #f0a23b;
+            --bg-top: #090f17;
+            --bg-main: #0d141f;
+            --line: #263548;
+            --accent: #4f8cff;
+            --accent-2: #f7a83d;
+            --green: #34d399;
+            --red: #fb7185;
             --text: #f5f7fb;
-            --muted: #aab6ca;
+            --muted: #9aa8bb;
             --soft: #d9dfeb;
-            --panel: rgba(18, 25, 37, 0.88);
+            --panel: rgba(15, 23, 35, 0.92);
         }
         .stApp {
-            background: linear-gradient(180deg, #0a0f18 0%, #0d1420 100%);
+            background:
+                radial-gradient(circle at 12% 0%, rgba(79, 140, 255, 0.14), transparent 30rem),
+                radial-gradient(circle at 84% 8%, rgba(247, 168, 61, 0.09), transparent 24rem),
+                linear-gradient(180deg, #070b12 0%, #0a1019 42%, #0b111b 100%);
             color: var(--text);
         }
         .stApp, .stApp p, .stApp span, .stApp div, .stApp label, .stApp li {
             color: var(--text);
+            font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         }
         .stMarkdown, .stMarkdown p, .stMarkdown span {
             color: var(--text) !important;
         }
         .block-container {
             max-width: 1440px;
-            padding: 1rem 2rem 2rem;
+            padding: 1rem 1.5rem 2rem;
         }
         .buff-nav {
             display: flex;
@@ -403,12 +346,13 @@ def inject_styles() -> None:
             box-shadow: 0 0 0 2px rgba(228, 144, 55, 0.35) !important;
         }
         .buff-hero {
-            background: #111820;
-            border: 1px solid #24303c;
-            border-radius: 4px;
+            background:
+                linear-gradient(135deg, rgba(17, 25, 37, 0.98) 0%, rgba(10, 15, 23, 0.98) 100%);
+            border: 1px solid rgba(116, 135, 166, 0.24);
+            border-radius: 10px;
             padding: 0;
             margin-bottom: 1rem;
-            box-shadow: 0 16px 36px rgba(0, 0, 0, 0.28);
+            box-shadow: 0 22px 55px rgba(0, 0, 0, 0.34);
             overflow: hidden;
         }
         .buff-breadcrumb {
@@ -418,16 +362,17 @@ def inject_styles() -> None:
         }
         .buff-grid {
             display: grid;
-            grid-template-columns: 340px minmax(0, 1fr) 280px;
+            grid-template-columns: minmax(300px, 42%) minmax(0, 58%);
             gap: 0;
             align-items: stretch;
         }
         .buff-image-card {
+            grid-row: 1 / span 2;
             background:
-                radial-gradient(circle at center, rgba(80, 118, 200, 0.18), transparent 58%),
-                linear-gradient(180deg, #202b38 0%, #141c26 100%);
+                radial-gradient(circle at center, rgba(79, 140, 255, 0.2), transparent 58%),
+                linear-gradient(180deg, #1b2635 0%, #101823 100%);
             border-radius: 0;
-            min-height: 246px;
+            min-height: 380px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -438,26 +383,31 @@ def inject_styles() -> None:
         }
         .buff-knife-art {
             width: 100%;
-            height: 220px;
+            height: 250px;
             object-fit: contain;
             object-position: center;
             filter: drop-shadow(0 18px 24px rgba(0, 0, 0, 0.35));
         }
         .buff-title {
-            font-size: 1.8rem;
+            font-size: clamp(1.65rem, 2.55vw, 2.35rem);
             font-weight: 800;
             margin: 0 0 0.65rem;
             color: var(--text) !important;
             line-height: 1.1;
         }
         .buff-item-main {
-            padding: 1.25rem;
+            grid-column: 2;
+            grid-row: 1;
+            padding: 1.2rem 1.25rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
         }
         .buff-market-tags {
             display: flex;
             flex-wrap: wrap;
             gap: 0.5rem;
-            margin-bottom: 0.9rem;
+            margin-bottom: 0.7rem;
         }
         .buff-market-tags span {
             background: #1b2631;
@@ -470,7 +420,7 @@ def inject_styles() -> None:
         }
         .buff-submeta {
             display: grid;
-            grid-template-columns: 1fr;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
             gap: 0.45rem;
             margin: 0;
         }
@@ -483,16 +433,21 @@ def inject_styles() -> None:
             border-radius: 4px;
             color: #d9dfeb !important;
             font-size: 0.86rem;
-            padding: 0.5rem 0.6rem;
+            padding: 0.45rem 0.55rem;
         }
         .buff-submeta strong {
             color: #ffffff !important;
             text-align: right;
         }
         .buff-price-panel {
-            background: #0c1218;
-            border-left: 1px solid #24303c;
-            padding: 1.25rem 1rem;
+            grid-column: 2;
+            grid-row: 2;
+            background:
+                radial-gradient(circle at top right, rgba(247, 168, 61, 0.13), transparent 15rem),
+                #090f16;
+            border-left: 1px solid rgba(116, 135, 166, 0.22);
+            border-top: 1px solid rgba(116, 135, 166, 0.22);
+            padding: 1.35rem 1.25rem;
         }
         .buff-price-label {
             color: #8793a1 !important;
@@ -502,7 +457,7 @@ def inject_styles() -> None:
         }
         .buff-price-value {
             color: #ffb23f !important;
-            font-size: 1.9rem;
+            font-size: clamp(1.8rem, 3vw, 2.45rem);
             font-weight: 900;
             line-height: 1.15;
             margin: 0.2rem 0 0.85rem;
@@ -519,6 +474,31 @@ def inject_styles() -> None:
         .buff-price-row strong {
             color: #f5f7fb !important;
             font-weight: 800;
+        }
+        .buff-price-micro {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.55rem;
+            margin: 0.9rem 0 0.8rem;
+        }
+        .buff-price-micro span {
+            background: rgba(17, 26, 39, 0.88);
+            border: 1px solid rgba(116, 135, 166, 0.2);
+            border-radius: 8px;
+            padding: 0.65rem;
+            color: #8f9baa !important;
+            font-size: 0.72rem;
+            font-weight: 800;
+            text-transform: uppercase;
+        }
+        .buff-price-micro strong {
+            display: block;
+            color: #f5f7fb !important;
+            font-size: 0.95rem;
+            line-height: 1.15;
+            margin-top: 0.3rem;
+            text-transform: none;
+            overflow-wrap: anywhere;
         }
         .buff-price-stats {
             display: grid;
@@ -682,17 +662,18 @@ def inject_styles() -> None:
             justify-content: space-between;
             gap: 1rem;
             align-items: flex-start;
-            background: #111820;
-            border: 1px solid #24303c;
-            border-radius: 4px;
+            background: rgba(10, 16, 25, 0.7);
+            border: 1px solid rgba(116, 135, 166, 0.2);
+            border-radius: 10px;
             padding: 1rem 1.15rem;
             margin-bottom: 1rem;
-            box-shadow: 0 18px 40px rgba(0, 0, 0, 0.24);
+            box-shadow: 0 18px 40px rgba(0, 0, 0, 0.2);
+            backdrop-filter: blur(10px);
         }
         .buff-header h1 {
             margin: 0;
             color: #f5f7fb !important;
-            font-size: 1.55rem;
+            font-size: clamp(1.45rem, 2.5vw, 2.2rem);
             letter-spacing: 0;
         }
         .buff-header p {
@@ -796,11 +777,20 @@ def inject_styles() -> None:
         }
         .dash-kpi-card,
         .signal-card {
-            background: linear-gradient(180deg, #111b27 0%, #0d141d 100%);
-            border: 1px solid #253443;
+            background:
+                linear-gradient(180deg, rgba(17, 27, 39, 0.96) 0%, rgba(10, 17, 27, 0.96) 100%);
+            border: 1px solid rgba(116, 135, 166, 0.22);
             border-radius: 10px;
             box-shadow: 0 14px 30px rgba(0, 0, 0, 0.22);
             padding: 0.9rem;
+            transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
+        }
+        .dash-kpi-card:hover,
+        .signal-card:hover {
+            transform: translateY(-1px);
+            border-color: rgba(247, 168, 61, 0.45);
+            background:
+                linear-gradient(180deg, rgba(21, 33, 48, 0.98) 0%, rgba(12, 20, 31, 0.98) 100%);
         }
         .dash-kpi-card span,
         .signal-card span {
@@ -814,16 +804,16 @@ def inject_styles() -> None:
         .dash-kpi-card strong {
             color: #f6f8fb !important;
             display: block;
-            font-size: 1.35rem;
+            font-size: clamp(1.05rem, 1.55vw, 1.42rem);
             line-height: 1.15;
             margin-top: 0.45rem;
             overflow-wrap: anywhere;
         }
         .positive {
-            color: #61d394 !important;
+            color: var(--green) !important;
         }
         .negative {
-            color: #ff6b6b !important;
+            color: var(--red) !important;
         }
         .dashboard-grid {
             display: grid;
@@ -832,10 +822,17 @@ def inject_styles() -> None:
             align-items: start;
         }
         .dashboard-panel {
-            background: #101820;
-            border: 1px solid #253443;
+            background: rgba(14, 22, 32, 0.94);
+            border: 1px solid rgba(116, 135, 166, 0.22);
             border-radius: 10px;
             padding: 1rem;
+            box-shadow: 0 16px 34px rgba(0, 0, 0, 0.22);
+        }
+        .chart-shell {
+            background: rgba(14, 22, 32, 0.94);
+            border: 1px solid rgba(116, 135, 166, 0.22);
+            border-radius: 10px;
+            padding: 0.75rem;
             box-shadow: 0 16px 34px rgba(0, 0, 0, 0.22);
         }
         .signal-grid {
@@ -855,6 +852,12 @@ def inject_styles() -> None:
         @media (max-width: 1100px) {
             .buff-grid {
                 grid-template-columns: 1fr;
+            }
+            .buff-image-card,
+            .buff-item-main,
+            .buff-price-panel {
+                grid-column: auto;
+                grid-row: auto;
             }
             .dashboard-grid,
             .dash-kpi-grid {
@@ -1127,6 +1130,10 @@ live_checked = str(live_listing.get("checked_at") or "N/A")
 status_class = "" if live_status == "live" else " buff-status-warn"
 last_update = latest["Timestamp"].strftime("%Y-%m-%d %H:%M UTC")
 latest_price_label = money(latest["Price"])
+price_series = pd.to_numeric(analysis_df["Price"], errors="coerce").dropna()
+average_price_label = money(price_series.mean() if not price_series.empty else pd.NA)
+highest_price_label = money(price_series.max() if not price_series.empty else pd.NA)
+lowest_price_label = money(price_series.min() if not price_series.empty else pd.NA)
 reference_price_label = money(reference_price)
 sell_stock_label = whole(sell_stock)
 buy_orders_label = whole(buy_orders)
@@ -1164,17 +1171,19 @@ st.markdown(
             <span>CS2</span><span>{knife_label}</span><span>{condition_label}</span>
           </div>
           <h1 class="buff-title">{family_label}</h1>
-          <div class="buff-submeta">
-            <span>Condition<br><strong>{condition_label}</strong></span>
-            <span>Sell listings<br><strong>{sell_stock_label}</strong></span>
-            <span>Buy orders<br><strong>{buy_orders_label}</strong></span>
-          </div>
           <div class="buff-market-tabs"><span>Selling</span><span>Buy Orders</span><span>History</span></div>
         </div>
         <div class="buff-price-panel">
           <div class="buff-price-label">Lowest sell order</div>
           <div class="buff-price-value">{latest_price_label}</div>
+          <div class="buff-price-micro">
+            <span>Average<strong>{average_price_label}</strong></span>
+            <span>High<strong>{highest_price_label}</strong></span>
+            <span>Low<strong>{lowest_price_label}</strong></span>
+            <span>Listings<strong>{sell_stock_label}</strong></span>
+          </div>
           <div class="buff-price-row"><span>Reference</span><strong>{reference_price_label}</strong></div>
+          <div class="buff-price-row"><span>Buy orders</span><strong>{buy_orders_label}</strong></div>
           <div class="buff-price-row"><span>Source</span><strong>{html.escape(listing_source)}</strong></div>
           <div class="buff-price-row"><span>Updated</span><strong>{last_update_label}</strong></div>
         </div>
@@ -1205,7 +1214,9 @@ summary["Timestamp"] = summary["Timestamp"].dt.strftime("%Y-%m-%d %H:%M")
 chart_col, activity_col = st.columns((2.1, 1))
 with chart_col:
     section_title("Price History", "Daily average, 7-day moving average, and liquidity overlay")
+    st.markdown('<div class="chart-shell">', unsafe_allow_html=True)
     st.altair_chart(chart_surface(combined_chart), width="stretch")
+    st.markdown("</div>", unsafe_allow_html=True)
 
 with activity_col:
     section_title("Market Activity", "Liquidity, trend, and smart signals")
