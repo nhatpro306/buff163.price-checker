@@ -33,8 +33,8 @@ from main import (
 
 REFRESH_SECONDS = int(os.getenv("BUFF_UI_REFRESH_SEC", "900"))
 CACHE_TTL_SECONDS = int(os.getenv("BUFF_UI_CACHE_TTL_SEC", "300"))
+st.set_page_config(page_title="BUFF163 Price Analytics", page_icon="📈", layout="wide")
 st_autorefresh(interval=max(30, REFRESH_SECONDS) * 1000, key="buff_refresh")
-st.set_page_config(page_title="CS2 Skin Market", layout="wide")
 
 TRACK_KEYWORDS = tuple(DEFAULT_TRACK_KEYWORDS)
 HIGH_VALUE_MIN_PRICE = float(os.getenv("BUFF_MIN_PRICE_CNY", "0"))
@@ -193,6 +193,97 @@ def load_sheet_records(sheet_name: str) -> pd.DataFrame:
 @st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
 def load_history_records() -> pd.DataFrame:
     return load_history_frame(get_store())
+
+
+def money(value: object) -> str:
+    numeric = pd.to_numeric(value, errors="coerce")
+    return "N/A" if pd.isna(numeric) else f"{float(numeric):,.2f} CNY"
+
+
+def whole(value: object) -> str:
+    numeric = pd.to_numeric(value, errors="coerce")
+    return "N/A" if pd.isna(numeric) else f"{int(numeric):,}"
+
+
+def section_title(title: str, subtitle: str = "") -> None:
+    st.markdown(
+        f"""
+        <div class="buff-section-title">
+          <h3>{title}</h3>
+          {f'<span>{subtitle}</span>' if subtitle else ''}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def empty_state(title: str, detail: str) -> None:
+    st.markdown(
+        f"""
+        <div class="buff-empty">
+          <strong>{title}</strong>
+          <span>{detail}</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def price_delta(frame: pd.DataFrame) -> tuple[float | None, float | None]:
+    prices = pd.to_numeric(frame.get("Price"), errors="coerce").dropna()
+    if len(prices) < 2:
+        return None, None
+    first = float(prices.iloc[0])
+    last = float(prices.iloc[-1])
+    if first == 0:
+        return last - first, None
+    return last - first, ((last - first) / first) * 100
+
+
+def render_kpis(frame: pd.DataFrame, sell_stock: int, buy_orders: int, reference_price: float) -> None:
+    prices = pd.to_numeric(frame.get("Price"), errors="coerce").dropna()
+    latest_price = prices.iloc[-1] if not prices.empty else pd.NA
+    change_abs, change_pct = price_delta(frame)
+    delta = None if change_abs is None else f"{change_abs:+,.2f} CNY"
+    pct_label = "N/A" if change_pct is None else f"{change_pct:+.2f}%"
+
+    rows = [
+        ("Latest Price", money(latest_price), delta),
+        ("Average Price", money(prices.mean() if not prices.empty else pd.NA), None),
+        ("Highest Price", money(prices.max() if not prices.empty else pd.NA), None),
+        ("Lowest Price", money(prices.min() if not prices.empty else pd.NA), None),
+        ("Price Change %", pct_label, None),
+        ("Listings Count", whole(sell_stock), None),
+        ("Buy Orders", whole(buy_orders), None),
+        ("Reference Price", money(reference_price), None),
+    ]
+    for start in (0, 4):
+        cols = st.columns(4)
+        for col, (label, value, item_delta) in zip(cols, rows[start:start + 4]):
+            col.metric(label, value, delta=item_delta)
+
+
+def format_market_table(frame: pd.DataFrame) -> pd.io.formats.style.Styler:
+    visible = frame.copy()
+    for col in ("Price", "Reference Price", "Predicted Price"):
+        if col in visible.columns:
+            visible[col] = pd.to_numeric(visible[col], errors="coerce")
+    for col in ("Listings", "Buy Orders", "Observed Orders", "Predicted Listings"):
+        if col in visible.columns:
+            visible[col] = pd.to_numeric(visible[col], errors="coerce")
+    formatters = {
+        col: "{:,.2f} CNY"
+        for col in ("Price", "Reference Price", "Predicted Price")
+        if col in visible.columns
+    }
+    formatters.update(
+        {
+            col: "{:,.0f}"
+            for col in ("Listings", "Buy Orders", "Observed Orders", "Predicted Listings")
+            if col in visible.columns
+        }
+    )
+    return visible.style.format(formatters, na_rep="N/A")
 
 
 def inject_styles() -> None:
@@ -493,6 +584,146 @@ def inject_styles() -> None:
             overflow: hidden;
             border: 1px solid rgba(95, 111, 142, 0.28);
         }
+        .stApp {
+            background: #0b111b;
+        }
+        .block-container {
+            padding-top: 1rem;
+        }
+        section[data-testid="stSidebar"] {
+            background: #0e1623;
+            border-right: 1px solid rgba(132, 150, 178, 0.18);
+        }
+        section[data-testid="stSidebar"] > div {
+            padding-top: 1.1rem;
+        }
+        section[data-testid="stSidebar"] h1,
+        section[data-testid="stSidebar"] h2,
+        section[data-testid="stSidebar"] h3,
+        section[data-testid="stSidebar"] label p {
+            color: #e9eef8 !important;
+        }
+        .buff-sidebar-head {
+            border: 1px solid rgba(132, 150, 178, 0.22);
+            background: rgba(18, 27, 40, 0.96);
+            border-radius: 12px;
+            padding: 0.9rem;
+            margin-bottom: 1rem;
+        }
+        .buff-sidebar-head strong {
+            display: block;
+            color: #f5f7fb !important;
+            font-size: 1rem;
+        }
+        .buff-sidebar-head span {
+            color: #9eabc0 !important;
+            font-size: 0.82rem;
+        }
+        .buff-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            align-items: flex-start;
+            background: #111a28;
+            border: 1px solid rgba(132, 150, 178, 0.22);
+            border-radius: 14px;
+            padding: 1.05rem 1.15rem;
+            margin-bottom: 1rem;
+            box-shadow: 0 18px 40px rgba(0, 0, 0, 0.24);
+        }
+        .buff-header h1 {
+            margin: 0;
+            color: #f5f7fb !important;
+            font-size: clamp(1.55rem, 2vw, 2.25rem);
+            letter-spacing: 0;
+        }
+        .buff-header p {
+            color: #9eabc0 !important;
+            margin: 0.35rem 0 0;
+        }
+        .buff-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            border: 1px solid rgba(73, 160, 120, 0.45);
+            background: rgba(73, 160, 120, 0.12);
+            color: #9be7c4 !important;
+            border-radius: 999px;
+            padding: 0.35rem 0.65rem;
+            white-space: nowrap;
+            font-size: 0.82rem;
+            font-weight: 700;
+        }
+        .buff-status-warn {
+            border-color: rgba(240, 162, 59, 0.48);
+            background: rgba(240, 162, 59, 0.13);
+            color: #ffd08a !important;
+        }
+        .buff-section-title {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+            margin: 1.15rem 0 0.55rem;
+        }
+        .buff-section-title h3 {
+            margin: 0;
+            font-size: 1.05rem;
+            color: #f5f7fb !important;
+        }
+        .buff-section-title span {
+            color: #9eabc0 !important;
+            font-size: 0.86rem;
+        }
+        .buff-empty {
+            border: 1px solid rgba(240, 162, 59, 0.35);
+            background: rgba(240, 162, 59, 0.08);
+            border-radius: 12px;
+            padding: 1rem;
+            margin: 0.75rem 0;
+        }
+        .buff-empty strong {
+            display: block;
+            color: #ffe0ad !important;
+            margin-bottom: 0.25rem;
+        }
+        .buff-empty span {
+            color: #c6cfdd !important;
+        }
+        div[data-testid="stMetric"] {
+            border-radius: 14px;
+            background: #111a28;
+            border: 1px solid rgba(132, 150, 178, 0.2);
+            box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18);
+            transition: transform 120ms ease, border-color 120ms ease;
+        }
+        div[data-testid="stMetric"]:hover {
+            transform: translateY(-1px);
+            border-color: rgba(240, 162, 59, 0.42);
+        }
+        div[data-testid="stMetricValue"] {
+            font-size: clamp(1.35rem, 1.8vw, 1.85rem) !important;
+            line-height: 1.12 !important;
+            white-space: normal !important;
+            overflow: visible !important;
+            text-overflow: clip !important;
+        }
+        button[data-baseweb="tab"] {
+            border-radius: 10px !important;
+            margin-right: 0.35rem !important;
+        }
+        div[data-testid="stTabs"] [data-baseweb="tab-list"] {
+            gap: 0.25rem;
+            border-bottom: 1px solid rgba(132, 150, 178, 0.18);
+        }
+        div[data-testid="stDataFrame"] {
+            border-radius: 12px;
+            background: #111a28;
+            border-color: rgba(132, 150, 178, 0.2);
+        }
+        div[data-testid="stSpinner"] {
+            color: #f5f7fb !important;
+        }
         @media (max-width: 1100px) {
             .buff-grid {
                 grid-template-columns: 1fr;
@@ -508,6 +739,9 @@ def inject_styles() -> None:
             }
             .buff-nav {
                 align-items: flex-start;
+                flex-direction: column;
+            }
+            .buff-header {
                 flex-direction: column;
             }
         }
@@ -568,19 +802,6 @@ if history_df.empty:
     st.stop()
     raise SystemExit(0)
 
-st.markdown(
-    f"""
-    <div class="buff-nav">
-      <div class="buff-brand">
-        <div class="buff-badge">B</div>
-        <div>CS2 Skin Market</div>
-      </div>
-      <div class="buff-nav-subtitle">Live BUFF listings {'enabled' if os.getenv('BUFF_COOKIE') else 'waiting for cookie'} · Auto refresh every {max(30, REFRESH_SECONDS) // 60} min</div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
 family_names = sorted(history_df["Family"].dropna().unique().tolist())
 
 history_df["_Base Knife"] = history_df.get(
@@ -588,57 +809,49 @@ history_df["_Base Knife"] = history_df.get(
 ).map(base_knife_type)
 knife_counts = history_df.groupby("_Base Knife")["Family"].nunique().sort_index()
 knife_types = [knife for knife in DEFAULT_TRACK_KEYWORDS if knife in knife_counts.index]
-if (
-    "selected_knife_type" not in st.session_state
-    or st.session_state["selected_knife_type"] not in knife_types
-):
-    st.session_state["selected_knife_type"] = knife_types[0] if knife_types else ""
 
-st.markdown('<div class="buff-picker-title">Choose knife type</div>', unsafe_allow_html=True)
-for row_start in range(0, len(knife_types), 5):
-    cols = st.columns(5)
-    for col, knife_type in zip(cols, knife_types[row_start : row_start + 5]):
-        knife_df = history_df[history_df["_Base Knife"] == knife_type].copy()
-        image_url = knife_tile_image(knife_df.sort_values("Timestamp"))
-        active_class = (
-            " buff-knife-tile-active"
-            if st.session_state["selected_knife_type"] == knife_type
-            else ""
-        )
-        with col:
-            st.markdown(
-                f"""
-                <div class="buff-selected-label">{'Selected' if active_class else '&nbsp;'}</div>
-                <div class="buff-knife-tile{active_class}">
-                  {f'<img src="{image_url}" alt="{knife_type}">' if image_url else '<div class="buff-knife-empty"></div>'}
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            if st.button(
-                f"{knife_type} ({int(knife_counts[knife_type])})",
-                key=f"knife_{knife_type}",
-                width="stretch",
-            ):
-                st.session_state["selected_knife_type"] = knife_type
-
-selected_knife_type = st.session_state["selected_knife_type"]
-scoped_names = sorted(
-    history_df.loc[history_df["_Base Knife"] == selected_knife_type, "Family"]
-    .dropna()
-    .unique()
-    .tolist()
-)
-filtered_families = scoped_names
-if not filtered_families:
+with st.sidebar:
+    st.markdown(
+        """
+        <div class="buff-sidebar-head">
+          <strong>BUFF163 Analytics</strong>
+          <span>Market filters and refresh controls</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    selected_knife_type = st.selectbox(
+        "Knife",
+        knife_types,
+        index=0,
+        format_func=lambda value: f"{value} ({int(knife_counts.get(value, 0))})",
+    )
+    scoped_names = sorted(
+        history_df.loc[history_df["_Base Knife"] == selected_knife_type, "Family"]
+        .dropna()
+        .unique()
+        .tolist()
+    )
     filtered_families = scoped_names or family_names
+    latest_family = (
+        history_df[history_df["Family"].isin(filtered_families)]
+        .sort_values("Timestamp")
+        .groupby("Family", as_index=False)
+        .tail(1)[["Family", "Price", "Listings"]]
+    )
+    sort_option = st.selectbox(
+        "Sort",
+        ("Name A-Z", "Latest price high-low", "Latest price low-high", "Listings high-low"),
+    )
+    if sort_option == "Latest price high-low":
+        filtered_families = latest_family.sort_values("Price", ascending=False)["Family"].tolist()
+    elif sort_option == "Latest price low-high":
+        filtered_families = latest_family.sort_values("Price", ascending=True)["Family"].tolist()
+    elif sort_option == "Listings high-low":
+        filtered_families = latest_family.sort_values("Listings", ascending=False)["Family"].tolist()
 
-family_selected = st.selectbox(
-    "Family",
-    filtered_families,
-    label_visibility="collapsed",
-    placeholder=f"{selected_knife_type} skins",
-)
+    family_selected = st.selectbox("Skin family", filtered_families, placeholder=f"{selected_knife_type} skins")
+
 family_df = history_df[history_df["Family"] == family_selected].copy()
 
 condition_latest = (
@@ -664,12 +877,15 @@ condition_labels = [
 ]
 condition_map = dict(zip(condition_labels, condition_latest["Condition"].tolist()))
 
-selected_condition_label = st.radio(
-    "Condition",
-    condition_labels,
-    horizontal=True,
-    label_visibility="collapsed",
-)
+with st.sidebar:
+    selected_condition_label = st.selectbox("Condition", condition_labels)
+    min_day = family_df["Timestamp"].min().date()
+    max_day = family_df["Timestamp"].max().date()
+    date_range = st.date_input("Date range", (min_day, max_day), min_value=min_day, max_value=max_day)
+    if st.button("Refresh data", width="stretch"):
+        st.cache_data.clear()
+        st.rerun()
+
 condition_selected = condition_map[selected_condition_label]
 
 variant_df = (
@@ -682,6 +898,16 @@ variant_df = (
     )
     .sort_values(["_source_key", "Timestamp"])
 )
+if isinstance(date_range, tuple) and len(date_range) == 2:
+    start_day, end_day = date_range
+else:
+    start_day = end_day = date_range
+range_mask = (variant_df["Timestamp"].dt.date >= start_day) & (variant_df["Timestamp"].dt.date <= end_day)
+analysis_df = variant_df[range_mask].copy()
+if analysis_df.empty:
+    empty_state("No rows in the selected date range", "Showing the full available history for this condition instead.")
+    analysis_df = variant_df.copy()
+
 latest = variant_df.iloc[-1]
 image_url = choose_image_url(variant_df)
 reference_price = (
@@ -704,26 +930,32 @@ if os.getenv("BUFF_APP_LIVE_LISTINGS", "1").strip().lower() in {"1", "true", "ye
             reference_price = float(cast(Any, live_listing["reference_price"]))
         image_url = str(live_listing.get("image_url") or image_url)
 listing_source = "BUFF" if sell_stock > 0 else "BUFF unavailable"
+live_status = str(live_listing.get("status") or ("disabled" if not os.getenv("BUFF_APP_LIVE_LISTINGS", "1").strip().lower() in {"1", "true", "yes", "on"} else "not checked"))
+live_checked = str(live_listing.get("checked_at") or "N/A")
+status_class = "" if live_status == "live" else " buff-status-warn"
+last_update = latest["Timestamp"].strftime("%Y-%m-%d %H:%M UTC")
 
 st.markdown(
     f"""
+    <div class="buff-header">
+      <div>
+        <h1>BUFF163 Price Analytics</h1>
+        <p>{family_selected} | {condition_selected} | {knife_category} | Goods ID {goods_id}</p>
+        <p>Last update: {last_update} | Checked: {live_checked} | Auto refresh: {max(30, REFRESH_SECONDS) // 60} min</p>
+      </div>
+      <div class="buff-status{status_class}">Market {live_status}</div>
+    </div>
     <div class="buff-hero">
-      <div class="buff-breadcrumb">Market &nbsp; &gt; &nbsp; {family_selected} ({condition_selected})</div>
       <div class="buff-grid">
         <div class="buff-image-card">
           {f'<img class="buff-knife-art" src="{image_url}" alt="{family_selected}">' if image_url else '<div style="color:#aab6ca;">No image available</div>'}
         </div>
         <div>
-          <h1 class="buff-title">{family_selected} ({condition_selected})</h1>
+          <h1 class="buff-title">{family_selected}</h1>
           <div class="buff-submeta">
-            <span>Quality | {condition_selected}</span>
-            <span>Category | {knife_category}</span>
-            <span>Goods ID | {goods_id}</span>
-          </div>
-          <div class="buff-statline">
-            <div class="buff-ref">Reference price <strong>{reference_price:,.2f} CNY</strong></div>
-            <div class="buff-ref">Listings <strong style="font-size:1.3rem;">{sell_stock if sell_stock else 'N/A'}</strong><br><span>{listing_source}</span></div>
-            <div class="buff-ref">Buy orders <strong style="font-size:1.3rem;">{buy_orders}</strong></div>
+            <span>Condition | {condition_selected}</span>
+            <span>Listings | {sell_stock if sell_stock else 'N/A'} ({listing_source})</span>
+            <span>Buy orders | {buy_orders}</span>
           </div>
         </div>
       </div>
@@ -732,33 +964,9 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-metric_cols = st.columns(4)
-metric_cols[0].metric("Lowest Sell", f"{float(latest['Price']):,.2f} CNY")
-metric_cols[1].metric(
-    "Listings", sell_stock if sell_stock else "N/A", help=f"Source: {listing_source}"
-)
-metric_cols[2].metric("Buy Orders", buy_orders)
-metric_cols[3].metric("Last Update", latest["Timestamp"].strftime("%Y-%m-%d"))
-live_status = str(
-    live_listing.get("status")
-    or (
-        "disabled"
-        if os.getenv("BUFF_APP_LIVE_LISTINGS", "1").strip().lower()
-        not in {"1", "true", "yes", "on"}
-        else "not checked"
-    )
-)
-live_checked = str(live_listing.get("checked_at") or "N/A")
-status_cols = st.columns((1.2, 1.2, 2.6))
-status_cols[0].caption(f"Live listing: {live_status}")
-status_cols[1].caption(f"Checked: {live_checked}")
-status_cols[2].caption(
-    "Set `BUFF_COOKIE` in Streamlit/GitHub secrets."
-    if live_status == "cookie missing"
-    else f"Cache TTL: {CACHE_TTL_SECONDS}s"
-)
+render_kpis(analysis_df, sell_stock, buy_orders, reference_price)
 
-daily_df = variant_df.copy()
+daily_df = analysis_df.copy()
 if "Listings" in daily_df.columns:
     daily_df.loc[daily_df["Listings"].fillna(0) <= 0, "Listings"] = pd.NA
 daily_df["Day"] = daily_df["Timestamp"].dt.date
@@ -768,58 +976,68 @@ daily_df = daily_df.groupby("Day", as_index=False).agg(
     BuyOrders=("Buy Orders", "last"),
 )
 daily_df["Day"] = pd.to_datetime(daily_df["Day"])
+daily_df["Moving Average"] = daily_df["Price"].rolling(7, min_periods=1).mean()
+high_point = daily_df[daily_df["Price"] == daily_df["Price"].max()]
+low_point = daily_df[daily_df["Price"] == daily_df["Price"].min()]
+chart_tooltip = [
+    alt.Tooltip("Day:T", title="Date"),
+    alt.Tooltip("Price:Q", title="Avg Price", format=",.2f"),
+    alt.Tooltip("Moving Average:Q", title="7D MA", format=",.2f"),
+    alt.Tooltip("Listings:Q", title="Listings", format=",.0f"),
+    alt.Tooltip("BuyOrders:Q", title="Buy Orders", format=",.0f"),
+]
 
 price_chart = (
     alt.Chart(daily_df)
-    .mark_line(color="#e49037", point=True, strokeWidth=3)
+    .mark_line(color="#f0a23b", interpolate="monotone", strokeWidth=3)
     .encode(
-        x=alt.X("Day:T", title="Day"),
-        y=alt.Y("Price:Q", title="Price (CNY)"),
-        tooltip=["Day:T", "Price:Q", "Listings:Q", "BuyOrders:Q"],
+        x=alt.X("Day:T", title="Date", axis=alt.Axis(labelColor="#9eabc0", titleColor="#c6cfdd")),
+        y=alt.Y("Price:Q", title="Price (CNY)", axis=alt.Axis(labelColor="#9eabc0", titleColor="#c6cfdd")),
+        tooltip=chart_tooltip,
     )
     .properties(height=320)
 )
+moving_average = (
+    alt.Chart(daily_df)
+    .mark_line(color="#49a078", interpolate="monotone", strokeDash=[6, 4], strokeWidth=2)
+    .encode(x="Day:T", y=alt.Y("Moving Average:Q", axis=None), tooltip=chart_tooltip)
+)
+extreme_points = alt.layer(
+    alt.Chart(high_point).mark_point(color="#ff6b6b", filled=True, size=90).encode(x="Day:T", y=alt.Y("Price:Q", axis=None), tooltip=chart_tooltip),
+    alt.Chart(low_point).mark_point(color="#6dd6ff", filled=True, size=90).encode(x="Day:T", y=alt.Y("Price:Q", axis=None), tooltip=chart_tooltip),
+)
 stock_chart = (
     alt.Chart(daily_df)
-    .mark_line(color="#5f7bd0", point=True, strokeWidth=2.5)
+    .mark_area(color="#5f7bd0", opacity=0.28, interpolate="monotone")
     .encode(
-        x=alt.X("Day:T", title="Day"),
-        y=alt.Y("Listings:Q", title="Sell Stock"),
-        tooltip=["Day:T", "Price:Q", "Listings:Q", "BuyOrders:Q"],
+        x=alt.X("Day:T", title="Date", axis=alt.Axis(labelColor="#9eabc0", titleColor="#c6cfdd")),
+        y=alt.Y("Listings:Q", title="Sell Stock", axis=alt.Axis(labelColor="#9eabc0", titleColor="#c6cfdd")),
+        tooltip=chart_tooltip,
     )
     .properties(height=180)
 )
 
-combined_chart = alt.layer(
-    price_chart,
+stock_overlay = (
     alt.Chart(daily_df)
-    .mark_line(color="#5f7bd0", point=True, strokeWidth=2.5, opacity=0.85)
+    .mark_line(color="#5f7bd0", interpolate="monotone", strokeWidth=2.2, opacity=0.85)
     .encode(
-        x=alt.X("Day:T", title="Day"),
+        x=alt.X("Day:T", title="Date"),
         y=alt.Y(
             "Listings:Q",
             title="Sell Stock",
             axis=alt.Axis(orient="right", labelColor="#aab6ca", titleColor="#aab6ca"),
         ),
-        tooltip=["Day:T", "Price:Q", "Listings:Q", "BuyOrders:Q"],
+        tooltip=chart_tooltip,
     )
-    .properties(height=320),
-).resolve_scale(y="independent")
+    .properties(height=320)
+)
+price_layers = alt.layer(price_chart, moving_average, extreme_points)
+combined_chart = alt.layer(price_chart, moving_average, extreme_points, stock_overlay).resolve_scale(y="independent")
 
 left, right = st.columns((2.2, 1))
 
 with left:
-    st.markdown(
-        """
-        <div class="buff-panel">
-          <div class="buff-panel-title">
-            <h3>Price Trend</h3>
-            <span class="buff-chip">Daily average sell price and day-end stock</span>
-          </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    section_title("Price Trend", "Daily average, 7-day moving average, and day-end stock")
     chart_mode = st.radio(
         "Chart mode",
         ("Combined (Price + Stock)", "Stacked (Price above Stock)"),
@@ -829,11 +1047,11 @@ with left:
     if chart_mode.startswith("Combined"):
         st.altair_chart(combined_chart, width="stretch")
     else:
-        st.altair_chart((price_chart & stock_chart).resolve_scale(x="shared"), width="stretch")
+        st.altair_chart((price_layers & stock_chart).resolve_scale(x="shared"), width="stretch")
 
 with right:
     summary = (
-        variant_df[["Timestamp", "Price", "Listings", "Buy Orders"]]
+        analysis_df[["Timestamp", "Price", "Listings", "Buy Orders"]]
         .sort_values("Timestamp", ascending=False)
         .head(8)
         .copy()
@@ -841,37 +1059,35 @@ with right:
     summary["Listings"] = summary["Listings"].fillna(0).astype(int)
     summary["Buy Orders"] = summary["Buy Orders"].fillna(0).astype(int)
     summary["Timestamp"] = summary["Timestamp"].dt.strftime("%Y-%m-%d %H:%M")
-    st.markdown(
-        """
-        <div class="buff-panel">
-          <div class="buff-panel-title">
-            <h3>Recent Selling Points</h3>
-            <span class="buff-chip">Sell / Buy depth</span>
-          </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.dataframe(summary, width="stretch", hide_index=True)
+    section_title("Recent Selling Points", "Sell / buy depth")
+    st.dataframe(format_market_table(summary), width="stretch", hide_index=True)
 
 tab1, tab2, tab3, tab4 = st.tabs(["Sell History", "Condition Catalog", "Forecast", "Full Catalog"])
 
 with tab1:
-    sell_view = variant_df[
+    section_title("Sell History", "Filtered historical observations")
+    sell_view = analysis_df[
         ["Timestamp", "Price", "Listings", "Buy Orders", "Reference Price", "Observed Orders"]
     ].sort_values("Timestamp", ascending=False)
-    sell_view["Listings"] = sell_view["Listings"].fillna(0).astype(int)
-    sell_view["Buy Orders"] = sell_view["Buy Orders"].fillna(0).astype(int)
-    sell_view["Observed Orders"] = (
-        pd.to_numeric(sell_view["Observed Orders"], errors="coerce").fillna(0).astype(int)
-    )
-    st.dataframe(sell_view, width="stretch", hide_index=True)
+    if sell_view.empty:
+        empty_state("No sell history", "Try widening the date range in the sidebar.")
+    else:
+        sell_view["Listings"] = sell_view["Listings"].fillna(0).astype(int)
+        sell_view["Buy Orders"] = sell_view["Buy Orders"].fillna(0).astype(int)
+        sell_view["Observed Orders"] = (
+            pd.to_numeric(sell_view["Observed Orders"], errors="coerce")
+            .fillna(0)
+            .astype(int)
+        )
+        st.dataframe(format_market_table(sell_view), width="stretch", hide_index=True)
 
 with tab2:
+    section_title("Condition Catalog", "Latest catalog rows for this family")
     if catalog_df.empty:
-        catalog_df = load_sheet_records(CATALOG_SHEET_NAME)
+        with st.spinner("Loading condition catalog..."):
+            catalog_df = load_sheet_records(CATALOG_SHEET_NAME)
     if catalog_df.empty:
-        st.info("Catalog sheet is empty.")
+        empty_state("Catalog sheet is empty", "Run the catalog sync to populate condition rows.")
     else:
         catalog_df["Price"] = pd.to_numeric(catalog_df["Price"], errors="coerce")
         catalog_df["Listings"] = pd.to_numeric(catalog_df["Listings"], errors="coerce")
@@ -889,19 +1105,24 @@ with tab2:
         )
         family_catalog["Listings"] = family_catalog["Listings"].fillna(0).astype(int)
         family_catalog["Buy Orders"] = family_catalog["Buy Orders"].fillna(0).astype(int)
-        st.dataframe(
-            family_catalog[
-                ["Skin Name", "Condition", "Price", "Listings", "Buy Orders", "Goods ID"]
-            ],
-            width="stretch",
-            hide_index=True,
-        )
+        table = family_catalog[
+            ["Skin Name", "Condition", "Price", "Listings", "Buy Orders", "Goods ID"]
+        ]
+        if table.empty:
+            empty_state(
+                "No catalog rows for this family",
+                "Select another family or refresh the catalog source.",
+            )
+        else:
+            st.dataframe(format_market_table(table), width="stretch", hide_index=True)
 
 with tab3:
+    section_title("Forecast", "Projected price and listing depth")
     if forecast_df.empty:
-        forecast_df = load_sheet_records(FORECAST_SHEET_NAME)
+        with st.spinner("Loading forecast..."):
+            forecast_df = load_sheet_records(FORECAST_SHEET_NAME)
     if forecast_df.empty:
-        st.info("Forecast sheet is empty.")
+        empty_state("Forecast sheet is empty", "Forecast rows will appear here after the forecast job runs.")
     else:
         forecast_df["Forecast Date"] = pd.to_datetime(forecast_df["Forecast Date"], errors="coerce")
         forecast_df["Predicted Price"] = pd.to_numeric(
@@ -914,12 +1135,12 @@ with tab3:
         target_skin_name = f"{family_selected} ({condition_selected})"
         forecast_view = forecast_df[forecast_df["Skin Name"] == target_skin_name].dropna()
         if forecast_view.empty:
-            st.info("No forecast rows for this condition.")
+            empty_state("No forecast rows for this condition", "Choose another condition or refresh after forecasting completes.")
         else:
             if "Predicted Listings" in forecast_view.columns:
                 price_forecast = (
                     alt.Chart(forecast_view)
-                    .mark_line(point=True, color="#49a078", strokeWidth=3)
+                    .mark_line(point=True, color="#49a078", interpolate="monotone", strokeWidth=3)
                     .encode(
                         x=alt.X("Forecast Date:T", title="Date"),
                         y=alt.Y("Predicted Price:Q", title="Predicted Price (CNY)"),
@@ -934,7 +1155,7 @@ with tab3:
                 )
                 listings_forecast = (
                     alt.Chart(forecast_view)
-                    .mark_line(color="#5f7bd0", point=True, strokeWidth=2.5, opacity=0.85)
+                    .mark_line(color="#5f7bd0", point=True, interpolate="monotone", strokeWidth=2.5, opacity=0.85)
                     .encode(
                         x=alt.X("Forecast Date:T", title="Date"),
                         y=alt.Y(
@@ -961,14 +1182,14 @@ with tab3:
                     if col in forecast_view.columns
                 ]
                 st.dataframe(
-                    forecast_view[show_cols].sort_values("Forecast Date"),
+                    format_market_table(forecast_view[show_cols].sort_values("Forecast Date")),
                     width="stretch",
                     hide_index=True,
                 )
             else:
                 forecast_chart = (
                     alt.Chart(forecast_view)
-                    .mark_line(point=True, color="#49a078", strokeWidth=3)
+                    .mark_line(point=True, color="#49a078", interpolate="monotone", strokeWidth=3)
                     .encode(
                         x=alt.X("Forecast Date:T", title="Date"),
                         y=alt.Y("Predicted Price:Q", title="Predicted Price (CNY)"),
@@ -979,6 +1200,7 @@ with tab3:
                 st.altair_chart(forecast_chart, width="stretch")
 
 with tab4:
+    section_title("Full Catalog", "On-demand catalog table")
     if "load_full_catalog" not in st.session_state:
         st.session_state["load_full_catalog"] = False
     col_load, col_hint = st.columns((1, 3))
@@ -989,10 +1211,11 @@ with tab4:
         st.caption("This sheet can be large; loading on demand keeps the app fast.")
 
     if st.session_state["load_full_catalog"] and all_catalog_df.empty:
-        all_catalog_df = load_sheet_records(ALL_CATALOG_SHEET_NAME)
+        with st.spinner("Loading full catalog..."):
+            all_catalog_df = load_sheet_records(ALL_CATALOG_SHEET_NAME)
 
     if all_catalog_df.empty:
-        st.info("Full catalog not loaded yet. Click 'Load Full Catalog'.")
+        empty_state("Full catalog not loaded", "Click Load Full Catalog to fetch the larger sheet on demand.")
     else:
         for numeric_col in ("Price", "Listings", "Buy Orders", "Reference Price"):
             if numeric_col in all_catalog_df.columns:
@@ -1021,8 +1244,13 @@ with tab4:
             )
             if c in scoped.columns
         ]
-        st.dataframe(
-            scoped[catalog_cols].sort_values(["Price"], ascending=False, na_position="last"),
-            width="stretch",
-            hide_index=True,
+        table = scoped[catalog_cols].sort_values(
+            ["Price"], ascending=False, na_position="last"
         )
+        if table.empty:
+            empty_state(
+                "No full catalog rows for this family",
+                "Select another family or reload the source data.",
+            )
+        else:
+            st.dataframe(format_market_table(table), width="stretch", hide_index=True)
