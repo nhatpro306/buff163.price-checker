@@ -131,8 +131,6 @@ def run(migrate_only: bool = False) -> None:
             f"Fallback merge: direct={direct_count}, "
             f"fallback={len(fallback_snapshots)}, final={len(snapshots)}."
         )
-        if enable_sqlite and sqlite_path and not write_sheets:
-            sqlite_write_snapshots(sqlite_path, fallback_snapshots, timestamp)
 
     full_catalog_enabled = os.getenv("BUFF_FULL_CATALOG", "").strip().lower() in {
         "1",
@@ -161,6 +159,8 @@ def run(migrate_only: bool = False) -> None:
         sqlite_write_snapshots(sqlite_path, snapshots, timestamp)
 
     if not write_sheets:
+        if enable_sqlite and sqlite_path:
+            sqlite_write_snapshots(sqlite_path, snapshots, timestamp)
         print(
             f"Collected {len(snapshots)} high-value snapshots for {', '.join(track_keywords)} "
             f"(>= {min_price:.0f} CNY, pages={high_value_pages})."

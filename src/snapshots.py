@@ -6,6 +6,20 @@ from market_models import MarketSnapshot
 from market_utils import normalize_image_url, split_market_name, try_float
 
 
+def _first_number(*values: Any) -> float | None:
+    for value in values:
+        parsed = try_float(value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _count_from(item: dict[str, Any], info: dict[str, Any], keys: tuple[str, ...]) -> int:
+    values = [source.get(key) for source in (item, info) for key in keys]
+    value = _first_number(*values)
+    return max(0, int(value)) if value is not None else 0
+
+
 def build_sell_order_snapshot(
     *,
     goods_id: str,
@@ -67,8 +81,16 @@ def build_market_item_snapshot(item: dict[str, Any]) -> MarketSnapshot | None:
         skin_name=f"{family} ({condition})" if condition and condition not in family else family,
         condition=condition or "Unknown",
         price=price,
-        listings=int(try_float(item.get("sell_num")) or 0),
-        buy_orders=int(try_float(item.get("buy_num")) or 0),
+        listings=_count_from(
+            item,
+            info,
+            ("sell_num", "sell_count", "sell_order_count", "sell_order_num", "total_count"),
+        ),
+        buy_orders=_count_from(
+            item,
+            info,
+            ("buy_num", "buy_count", "buy_order_count", "buy_order_num"),
+        ),
         reference_price=try_float(item.get("sell_reference_price") or info.get("steam_price_cny")),
         image_url=normalize_image_url(
             info.get("original_icon_url")

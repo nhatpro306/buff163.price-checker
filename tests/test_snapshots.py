@@ -37,6 +37,27 @@ def test_build_market_item_snapshot_success():
     assert snapshot.goods_id == "42"
     assert snapshot.condition == "Factory New"
     assert snapshot.price == 100.5
+    assert snapshot.listings == 3
+    assert snapshot.buy_orders == 2
+
+
+def test_build_market_item_snapshot_uses_nested_listing_aliases():
+    snapshot = build_market_item_snapshot(
+        {
+            "id": "755862",
+            "sell_min_price": "1639.08",
+            "goods_info": {
+                "market_hash_name": "Bayonet (Unknown)",
+                "sell_order_count": "1,234",
+                "buy_order_count": "17",
+            },
+        }
+    )
+
+    assert snapshot is not None
+    assert snapshot.goods_id == "755862"
+    assert snapshot.listings == 1234
+    assert snapshot.buy_orders == 17
 
 
 def test_build_market_item_snapshot_missing_price():

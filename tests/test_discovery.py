@@ -55,11 +55,14 @@ def test_discover_snapshots_from_market_builds_sorted_snapshots():
                         "id": "2",
                         "market_hash_name": "Karambit | Doppler (Factory New)",
                         "sell_min_price": "150",
+                        "goods_info": {"sell_order_count": "8", "buy_order_count": "3"},
                     },
                     {
                         "id": "1",
                         "market_hash_name": "Butterfly Knife | Fade (Factory New)",
                         "sell_min_price": "200",
+                        "sell_count": "12",
+                        "buy_count": "4",
                     },
                 ],
                 "total_page": 1,
@@ -71,3 +74,5 @@ def test_discover_snapshots_from_market_builds_sorted_snapshots():
 
     assert [snapshot.goods_id for snapshot in snapshots] == ["1", "2"]
     assert all(snapshot.price >= 100 for snapshot in snapshots)
+    assert {snapshot.goods_id: snapshot.listings for snapshot in snapshots} == {"1": 12, "2": 8}
+    assert {snapshot.goods_id: snapshot.buy_orders for snapshot in snapshots} == {"1": 4, "2": 3}
