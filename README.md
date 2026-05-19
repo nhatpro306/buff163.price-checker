@@ -7,7 +7,7 @@ The project has two user-facing entry points:
 - `python main.py` runs the tracker.
 - `streamlit run app.py` opens the dashboard.
 
-`main.py` is intentionally small. Most real logic lives in `src/` so the code is easier to test and maintain.
+`main.py` and `app.py` are intentionally small entry points. Most tracker logic lives in `src/`, and dashboard helpers live in `src/dashboard/` so the code is easier to test and maintain.
 
 ## Features
 
@@ -38,12 +38,21 @@ The project has two user-facing entry points:
 ```text
 .
 |-- main.py                    # CLI facade and backward-compatible exports
-|-- app.py                     # Streamlit dashboard
-|-- app_data_utils.py          # Dashboard data loading and cleanup helpers
+|-- app.py                     # Streamlit dashboard entry point
 |-- market_config.py           # Constants, sheet names, defaults, headers
 |-- market_models.py           # MarketSnapshot dataclass
 |-- market_utils.py            # Shared parsing, env, JSON, and image helpers
 |-- src/
+|   |-- dashboard/
+|   |   |-- config.py          # Streamlit page setup and dashboard env constants
+|   |   |-- data.py            # Cached dashboard data and live-listing helpers
+|   |   |-- data_utils.py      # Dashboard frame loading and cleanup helpers
+|   |   |-- charts.py          # Altair chart builders
+|   |   |-- metrics.py         # KPI, signal, and mover helpers
+|   |   |-- sections.py        # Dashboard section renderers
+|   |   |-- sidebar.py         # Sidebar filters and selection state
+|   |   |-- styles.py          # Dashboard CSS
+|   |   `-- ui.py              # Shared UI formatting helpers
 |   |-- cli.py                 # argparse command-line entry point
 |   |-- orchestrator.py        # High-level tracker workflow
 |   |-- settings.py            # Environment-driven search settings

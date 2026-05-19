@@ -6,9 +6,9 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from app_charts import chart_surface, daily_market_frame, price_history_chart
-from app_metrics import dashboard_kpis, market_signal_cards, top_movers
-from app_ui import empty_state, format_market_table, section_title
+from src.dashboard.charts import chart_surface, daily_market_frame, price_history_chart
+from src.dashboard.metrics import dashboard_kpis, market_signal_cards, top_movers
+from src.dashboard.ui import empty_state, format_market_table, section_title
 from main import FORECAST_SHEET_NAME
 
 

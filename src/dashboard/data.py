@@ -6,12 +6,12 @@ import pandas as pd
 import streamlit as st
 from gspread import WorksheetNotFound
 
-from app_config import CACHE_TTL_SECONDS, HIGH_VALUE_MIN_PRICE, TRACK_KEYWORDS
-from app_data_utils import (
+from src.dashboard.config import CACHE_TTL_SECONDS, HIGH_VALUE_MIN_PRICE, TRACK_KEYWORDS
+from src.dashboard.data_utils import (
     filter_depthless_fallback_rows,
     filter_fallback_overrides_same_day,
 )
-from app_ui import base_knife_type
+from src.dashboard.ui import base_knife_type
 from main import (
     CATALOG_HEADERS,
     CATALOG_SHEET_NAME,

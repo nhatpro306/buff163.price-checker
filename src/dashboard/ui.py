@@ -5,7 +5,7 @@ import html
 import pandas as pd
 import streamlit as st
 
-from app_data_utils import choose_image_url
+from src.dashboard.data_utils import choose_image_url
 
 
 def base_knife_type(value: object) -> str:
