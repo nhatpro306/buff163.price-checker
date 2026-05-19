@@ -7,6 +7,7 @@ import pandas as pd
 
 from market_config import HISTORY_HEADERS
 from market_models import MarketSnapshot
+from market_utils import debug_log
 
 
 def sqlite_connect(db_path: str) -> sqlite3.Connection:
@@ -106,6 +107,7 @@ def sqlite_upsert_snapshot(
 
 def sqlite_write_snapshots(db_path: str, snapshots: list[MarketSnapshot], timestamp: str) -> None:
     if not snapshots:
+        debug_log(f"sqlite_write skipped timestamp={timestamp} snapshots=0")
         return
     conn = sqlite_connect(db_path)
     try:
@@ -113,6 +115,15 @@ def sqlite_write_snapshots(db_path: str, snapshots: list[MarketSnapshot], timest
         with conn:
             for snapshot in snapshots:
                 sqlite_upsert_snapshot(conn, timestamp=timestamp, snapshot=snapshot)
+            written_rows = conn.execute(
+                "SELECT COUNT(*) FROM snapshots WHERE ts = ?", (timestamp,)
+            ).fetchone()[0]
+        debug_log(
+            "sqlite_write "
+            f"timestamp={timestamp} input={len(snapshots)} "
+            f"distinct_goods={len({snapshot.goods_id for snapshot in snapshots})} "
+            f"rows_at_timestamp={written_rows}"
+        )
     finally:
         conn.close()
 

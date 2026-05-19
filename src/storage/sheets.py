@@ -25,6 +25,7 @@ from market_config import (
 from market_models import MarketSnapshot
 from market_utils import (
     csgo_api_image_map,
+    debug_log,
     env_flag,
     load_json_file,
     save_json_file,
@@ -97,12 +98,16 @@ def migrate_history_sheet(store: SheetStore) -> int:
 def load_history_frame(store: SheetStore) -> pd.DataFrame:
     rows = store.history_rows()
     if not rows:
+        debug_log("sheet_history loaded rows=0")
         return pd.DataFrame(columns=HISTORY_HEADERS)
-    return pd.DataFrame(rows, columns=HISTORY_HEADERS)
+    frame = pd.DataFrame(rows, columns=HISTORY_HEADERS)
+    debug_log(f"sheet_history loaded rows={len(frame)}")
+    return frame
 
 
 def append_history(store: SheetStore, snapshots: list[MarketSnapshot], timestamp: str) -> None:
     if not snapshots:
+        debug_log(f"sheet_history append skipped timestamp={timestamp} snapshots=0")
         return
     sheet = store.worksheet(LOG_SHEET_NAME, HISTORY_HEADERS)
     rows = [
@@ -123,6 +128,10 @@ def append_history(store: SheetStore, snapshots: list[MarketSnapshot], timestamp
         for snapshot in snapshots
     ]
     sheet.append_rows(rows, value_input_option="USER_ENTERED")
+    debug_log(
+        "sheet_history append "
+        f"timestamp={timestamp} rows={len(rows)} distinct_goods={len({s.goods_id for s in snapshots})}"
+    )
 
 
 def rebuild_catalog(store: SheetStore, snapshots: list[MarketSnapshot]) -> None:
@@ -147,6 +156,9 @@ def rebuild_catalog(store: SheetStore, snapshots: list[MarketSnapshot]) -> None:
             ],
             value_input_option="USER_ENTERED",
         )
+    debug_log(
+        f"sheet_catalog rebuild rows={len(snapshots)} distinct_goods={len({s.goods_id for s in snapshots})}"
+    )
 
 
 def rebuild_all_catalog(store: SheetStore, snapshots: list[MarketSnapshot], timestamp: str) -> None:
@@ -154,6 +166,7 @@ def rebuild_all_catalog(store: SheetStore, snapshots: list[MarketSnapshot], time
     sheet.clear()
     sheet.append_row(ALL_CATALOG_HEADERS)
     if not snapshots:
+        debug_log(f"sheet_all_catalog rebuild timestamp={timestamp} rows=0")
         return
     rows = [
         [
@@ -172,6 +185,10 @@ def rebuild_all_catalog(store: SheetStore, snapshots: list[MarketSnapshot], time
         for snapshot in snapshots
     ]
     sheet.append_rows(rows, value_input_option="USER_ENTERED")
+    debug_log(
+        "sheet_all_catalog rebuild "
+        f"timestamp={timestamp} rows={len(rows)} distinct_goods={len({s.goods_id for s in snapshots})}"
+    )
 
 
 def rebuild_dashboard(store: SheetStore, analysis_rows: list[dict[str, Any]]) -> None:

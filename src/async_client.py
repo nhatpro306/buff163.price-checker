@@ -8,6 +8,7 @@ import httpx
 from market_models import MarketSnapshot
 from src.buff_http import buff_headers, max_429_attempts, request_timeout
 from src.snapshots import build_sell_order_snapshot
+from market_utils import debug_log
 
 
 class AsyncBuffPriceClient:
@@ -67,13 +68,25 @@ class AsyncBuffPriceClient:
     async def fetch_many(self, goods_ids: list[str], concurrency: int = 5) -> list[MarketSnapshot]:
         sem = asyncio.Semaphore(max(1, concurrency))
         snapshots: list[MarketSnapshot] = []
+        failures = 0
 
         async def _task(goods_id: str) -> None:
+            nonlocal failures
             async with sem:
-                snapshot = await self.fetch_sell_snapshot(goods_id)
+                try:
+                    snapshot = await self.fetch_sell_snapshot(goods_id)
+                except Exception as exc:
+                    failures += 1
+                    debug_log(f"async_fetch_many skip goods_id={goods_id} error={exc}")
+                    return
                 snapshots.append(snapshot)
 
         await asyncio.gather(*[_task(str(gid)) for gid in goods_ids])
+        debug_log(
+            "async_fetch_many final "
+            f"requested={len(goods_ids)} fetched={len(snapshots)} failures={failures} "
+            f"concurrency={concurrency}"
+        )
         return snapshots
 
     async def aclose(self) -> None:

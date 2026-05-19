@@ -115,6 +115,11 @@ def env_flag(name: str, default: bool = False) -> bool:
     return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def debug_log(message: str) -> None:
+    if env_flag("BUFF_DEBUG_LISTINGS", False):
+        print(f"[listing-debug] {message}", flush=True)
+
+
 def split_market_name(name: str) -> tuple[str, str]:
     cleaned = name.replace("★ ", "").strip()
     match = re.match(r"(.+?) \((.+)\)$", cleaned)

@@ -11,6 +11,7 @@ from streamlit_autorefresh import st_autorefresh
 
 from app_data_utils import (
     choose_image_url,
+    filter_fallback_overrides_same_day,
     filter_high_value_families,
     load_app_frames,
     prepare_history_frame,
@@ -30,6 +31,7 @@ from main import (
     load_history_frame,
     sqlite_load_history_frame,
 )
+from market_utils import debug_log, env_flag
 
 REFRESH_SECONDS = int(os.getenv("BUFF_UI_REFRESH_SEC", "900"))
 CACHE_TTL_SECONDS = int(os.getenv("BUFF_UI_CACHE_TTL_SEC", "300"))
@@ -78,6 +80,7 @@ def merge_fallback_history(history: pd.DataFrame) -> pd.DataFrame:
     except Exception:
         return history
     if history.empty:
+        debug_log(f"ui fallback_merge history=0 fallback={len(fallback)} final={len(fallback)}")
         return fallback
     fallback = fallback.copy()
     history = history.copy()
@@ -99,13 +102,21 @@ def merge_fallback_history(history: pd.DataFrame) -> pd.DataFrame:
             fallback["Buy Orders"].fillna(0) > 0, fallback["_Hist Buy Orders"]
         )
         fallback = fallback.drop(columns=["_Hist Listings", "_Hist Buy Orders"])
+    fallback_before_filter = len(fallback)
+    fallback = filter_fallback_overrides_same_day(history, fallback)
     fallback["_Fallback Current"] = 1
     history["_Fallback Current"] = 0
     merged = pd.concat([history, fallback], ignore_index=True)
     merged["Timestamp"] = pd.to_datetime(merged["Timestamp"], errors="coerce", utc=True)
-    return merged.sort_values(["_Fallback Current", "Timestamp"]).drop(
+    result = merged.sort_values(["_Fallback Current", "Timestamp"]).drop(
         columns=["_Fallback Current"]
     )
+    debug_log(
+        "ui fallback_merge "
+        f"history={len(history)} fallback_raw={fallback_before_filter} "
+        f"fallback_kept={len(fallback)} final={len(result)}"
+    )
+    return result
 
 
 def base_knife_type(value: object) -> str:
@@ -765,6 +776,12 @@ history_df, catalog_df, all_catalog_df, forecast_df, startup_error = load_app_fr
     all_catalog_sheet_name=ALL_CATALOG_SHEET_NAME,
     forecast_sheet_name=FORECAST_SHEET_NAME,
 )
+debug_log(
+    "ui loaded "
+    f"history_rows={len(history_df)} catalog_rows={len(catalog_df)} "
+    f"all_catalog_rows={len(all_catalog_df)} forecast_rows={len(forecast_df)} "
+    f"source={'sqlite' if use_sqlite and sqlite_path else 'sheets'}"
+)
 
 if startup_error is not None:
     try:
@@ -783,7 +800,9 @@ if startup_error is not None:
 if history_df.empty:
     history_df = fallback_history_frame()
 
+history_before_fallback = len(history_df)
 history_df = merge_fallback_history(history_df)
+debug_log(f"ui after_fallback before={history_before_fallback} after={len(history_df)}")
 
 required_cols = {"Timestamp", "Price", "Listings", "Family", "Skin Name", "Condition"}
 if not required_cols.issubset(set(history_df.columns)):
@@ -792,8 +811,15 @@ if not required_cols.issubset(set(history_df.columns)):
     st.stop()
     raise SystemExit(0)
 
+history_before_prepare = len(history_df)
 history_df = prepare_history_frame(history_df)
+debug_log(f"ui after_prepare before={history_before_prepare} after={len(history_df)}")
+history_before_value_filter = len(history_df)
 history_df = filter_high_value_families(history_df, TRACK_KEYWORDS, HIGH_VALUE_MIN_PRICE)
+debug_log(
+    "ui after_value_filter "
+    f"before={history_before_value_filter} after={len(history_df)} min_price={HIGH_VALUE_MIN_PRICE}"
+)
 
 if history_df.empty:
     st.warning(
@@ -907,6 +933,18 @@ analysis_df = variant_df[range_mask].copy()
 if analysis_df.empty:
     empty_state("No rows in the selected date range", "Showing the full available history for this condition instead.")
     analysis_df = variant_df.copy()
+debug_log(
+    "ui selection "
+    f"family={family_selected!r} condition={condition_selected!r} "
+    f"family_rows={len(family_df)} variant_rows={len(variant_df)} displayed_rows={len(analysis_df)} "
+    f"date_start={start_day} date_end={end_day}"
+)
+if env_flag("BUFF_DEBUG_LISTINGS", False):
+    with st.sidebar.expander("Debug counts"):
+        st.caption(f"History rows: {len(history_df):,}")
+        st.caption(f"Family rows: {len(family_df):,}")
+        st.caption(f"Condition rows: {len(variant_df):,}")
+        st.caption(f"Displayed rows: {len(analysis_df):,}")
 
 latest = variant_df.iloc[-1]
 image_url = choose_image_url(variant_df)

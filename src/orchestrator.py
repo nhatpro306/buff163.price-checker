@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 from market_config import DEFAULT_SQLITE_PATH, SHEET_NAME
 from market_models import MarketSnapshot
-from market_utils import env_flag
+from market_utils import debug_log, env_flag
 from src.analysis import PriceAnalysisAgent
 from src.client import BuffPriceClient
 from src.settings import get_search_keywords, get_seed_goods_ids
@@ -53,6 +53,9 @@ def run(migrate_only: bool = False) -> None:
     history = (
         load_history_frame(store) if store is not None else sqlite_load_history_frame(sqlite_path)
     )
+    debug_log(
+        f"pipeline history_loaded rows={len(history)} source={'sheets' if store is not None else 'sqlite'}"
+    )
     if migrate_only:
         agent = PriceAnalysisAgent(history)
         tracked_names = sorted(history["Skin Name"].dropna().unique().tolist())
@@ -94,8 +97,16 @@ def run(migrate_only: bool = False) -> None:
                 else None
             ),
         )
+        debug_log(
+            "pipeline direct_complete "
+            f"snapshots={len(snapshots)} distinct_goods={len({s.goods_id for s in snapshots})}"
+        )
     if env_flag("BUFF_FALLBACK_CSGOTRADER", False):
         fallback_snapshots = csgotrader_snapshots(track_keywords, min_price)
+        debug_log(
+            "pipeline fallback_raw "
+            f"snapshots={len(fallback_snapshots)} distinct_goods={len({s.goods_id for s in fallback_snapshots})}"
+        )
         fallback_snapshots, backfilled_rows = enrich_fallback_snapshots_with_latest_depth(
             fallback_snapshots, history
         )
@@ -111,6 +122,11 @@ def run(migrate_only: bool = False) -> None:
             )
         direct_count = len(snapshots)
         snapshots = merge_direct_and_fallback_snapshots(snapshots, fallback_snapshots)
+        debug_log(
+            "pipeline fallback_merged "
+            f"direct={direct_count} fallback={len(fallback_snapshots)} "
+            f"final={len(snapshots)}"
+        )
         print(
             f"Fallback merge: direct={direct_count}, "
             f"fallback={len(fallback_snapshots)}, final={len(snapshots)}."
@@ -132,7 +148,12 @@ def run(migrate_only: bool = False) -> None:
             max_pages_per_keyword=max_pages,
             match_keywords=track_keywords,
         )
+        before_full_merge = len(snapshots)
         snapshots = merge_snapshots_with_full_catalog(snapshots, full_snapshots)
+        debug_log(
+            "pipeline full_catalog_merged "
+            f"primary={before_full_merge} full={len(full_snapshots)} final={len(snapshots)}"
+        )
         if store is not None:
             rebuild_all_catalog(store, full_snapshots, timestamp)
 
