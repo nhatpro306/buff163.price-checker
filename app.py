@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import os
 from typing import Any, cast
 
@@ -35,7 +36,12 @@ from market_utils import debug_log, env_flag
 
 REFRESH_SECONDS = int(os.getenv("BUFF_UI_REFRESH_SEC", "900"))
 CACHE_TTL_SECONDS = int(os.getenv("BUFF_UI_CACHE_TTL_SEC", "300"))
-st.set_page_config(page_title="BUFF163 Price Analytics", page_icon="📈", layout="wide")
+st.set_page_config(
+    page_title="BUFF163 Price Analytics",
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 st_autorefresh(interval=max(30, REFRESH_SECONDS) * 1000, key="buff_refresh")
 
 TRACK_KEYWORDS = tuple(DEFAULT_TRACK_KEYWORDS)
@@ -69,7 +75,7 @@ def fallback_history_frame() -> pd.DataFrame:
 
 
 def merge_fallback_history(history: pd.DataFrame) -> pd.DataFrame:
-    if os.getenv("BUFF_APP_FALLBACK_CSGOTRADER", "1").strip().lower() not in {
+    if os.getenv("BUFF_APP_FALLBACK_CSGOTRADER", "0").strip().lower() not in {
         "1",
         "true",
         "yes",
@@ -271,10 +277,22 @@ def render_kpis(
         ("Buy Orders", whole(buy_orders), None),
         ("Reference Price", money(reference_price), None),
     ]
-    for start in (0, 4):
-        cols = st.columns(4)
-        for col, (label, value, item_delta) in zip(cols, rows[start : start + 4]):
-            col.metric(label, value, delta=item_delta)
+    cards = []
+    for label, value, item_delta in rows:
+        delta_class = " buff-kpi-delta-down" if str(item_delta).startswith("-") else ""
+        delta_html = (
+            f'<div class="buff-kpi-delta{delta_class}">{html.escape(item_delta)}</div>'
+            if item_delta
+            else ""
+        )
+        cards.append(
+            '<div class="buff-kpi">'
+            f'<div class="buff-kpi-label">{html.escape(label)}</div>'
+            f'<div class="buff-kpi-value">{html.escape(value)}</div>'
+            f"{delta_html}"
+            "</div>"
+        )
+    st.markdown(f'<div class="buff-kpi-grid">{"".join(cards)}</div>', unsafe_allow_html=True)
 
 
 def format_market_table(frame: pd.DataFrame) -> pd.io.formats.style.Styler:
@@ -325,10 +343,7 @@ def inject_styles() -> None:
             --panel: rgba(18, 25, 37, 0.88);
         }
         .stApp {
-            background:
-                radial-gradient(circle at 85% 0%, rgba(240, 162, 59, 0.13), transparent 24rem),
-                radial-gradient(circle at 10% 12%, rgba(80, 118, 200, 0.16), transparent 26rem),
-                linear-gradient(180deg, var(--bg-top) 0%, var(--bg-main) 30%, #0f1622 100%);
+            background: linear-gradient(180deg, #0a0f18 0%, #0d1420 100%);
             color: var(--text);
         }
         .stApp, .stApp p, .stApp span, .stApp div, .stApp label, .stApp li {
@@ -338,9 +353,8 @@ def inject_styles() -> None:
             color: var(--text) !important;
         }
         .block-container {
-            max-width: 1500px;
-            padding-top: 0.8rem;
-            padding-bottom: 2rem;
+            max-width: 1440px;
+            padding: 1rem 2rem 2rem;
         }
         .buff-nav {
             display: flex;
@@ -449,14 +463,13 @@ def inject_styles() -> None:
             box-shadow: 0 0 0 2px rgba(228, 144, 55, 0.35) !important;
         }
         .buff-hero {
-            background:
-                radial-gradient(circle at 20% 8%, rgba(240, 162, 59, 0.13), transparent 18rem),
-                linear-gradient(135deg, rgba(18, 25, 37, 0.96) 0%, rgba(28, 38, 55, 0.96) 100%);
-            border: 1px solid rgba(126, 146, 184, 0.32);
-            border-radius: 8px;
-            padding: 1.25rem;
+            background: #111820;
+            border: 1px solid #24303c;
+            border-radius: 4px;
+            padding: 0;
             margin-bottom: 1rem;
-            box-shadow: 0 28px 65px rgba(0, 0, 0, 0.28);
+            box-shadow: 0 16px 36px rgba(0, 0, 0, 0.28);
+            overflow: hidden;
         }
         .buff-breadcrumb {
             color: var(--muted) !important;
@@ -465,45 +478,126 @@ def inject_styles() -> None:
         }
         .buff-grid {
             display: grid;
-            grid-template-columns: 380px minmax(0, 1fr);
-            gap: 1rem;
+            grid-template-columns: 340px minmax(0, 1fr) 280px;
+            gap: 0;
             align-items: stretch;
         }
         .buff-image-card {
             background:
-                radial-gradient(circle at center, rgba(240, 162, 59, 0.14), transparent 36%),
-                radial-gradient(circle at 70% 18%, rgba(112, 143, 208, 0.2), transparent 42%),
-                linear-gradient(180deg, #253247 0%, #344761 100%);
-            border-radius: 8px;
-            min-height: 300px;
+                radial-gradient(circle at center, rgba(80, 118, 200, 0.18), transparent 58%),
+                linear-gradient(180deg, #202b38 0%, #141c26 100%);
+            border-radius: 0;
+            min-height: 246px;
             display: flex;
             align-items: center;
             justify-content: center;
-            border: 1px solid rgba(120, 138, 173, 0.22);
+            border: 0;
+            border-right: 1px solid #24303c;
             overflow: hidden;
             padding: 1rem;
         }
         .buff-knife-art {
             width: 100%;
-            height: 260px;
+            height: 220px;
             object-fit: contain;
             object-position: center;
             filter: drop-shadow(0 18px 24px rgba(0, 0, 0, 0.35));
         }
         .buff-title {
-            font-size: 2.2rem;
-            font-weight: 700;
-            margin: 0 0 0.65rem 0;
+            font-size: 1.8rem;
+            font-weight: 800;
+            margin: 0 0 0.65rem;
             color: var(--text) !important;
             line-height: 1.1;
         }
-        .buff-submeta {
+        .buff-item-main {
+            padding: 1.25rem;
+        }
+        .buff-market-tags {
             display: flex;
             flex-wrap: wrap;
-            gap: 1.2rem;
-            color: var(--muted) !important;
-            font-size: 0.98rem;
-            margin-bottom: 1rem;
+            gap: 0.5rem;
+            margin-bottom: 0.9rem;
+        }
+        .buff-market-tags span {
+            background: #1b2631;
+            border: 1px solid #303c49;
+            border-radius: 3px;
+            color: #c7d0dc !important;
+            font-size: 0.78rem;
+            font-weight: 700;
+            padding: 0.28rem 0.5rem;
+        }
+        .buff-submeta {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 0.45rem;
+            margin: 0;
+        }
+        .buff-submeta span {
+            display: flex;
+            justify-content: space-between;
+            gap: 0.75rem;
+            background: #151f29;
+            border: 1px solid #2a3644;
+            border-radius: 4px;
+            color: #d9dfeb !important;
+            font-size: 0.86rem;
+            padding: 0.5rem 0.6rem;
+        }
+        .buff-submeta strong {
+            color: #ffffff !important;
+            text-align: right;
+        }
+        .buff-price-panel {
+            background: #0c1218;
+            border-left: 1px solid #24303c;
+            padding: 1.25rem 1rem;
+        }
+        .buff-price-label {
+            color: #8793a1 !important;
+            font-size: 0.78rem;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+        .buff-price-value {
+            color: #ffb23f !important;
+            font-size: 1.9rem;
+            font-weight: 900;
+            line-height: 1.15;
+            margin: 0.2rem 0 0.85rem;
+        }
+        .buff-price-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            border-top: 1px solid #24303c;
+            color: #c7d0dc !important;
+            font-size: 0.9rem;
+            padding: 0.62rem 0;
+        }
+        .buff-price-row strong {
+            color: #f5f7fb !important;
+            font-weight: 800;
+        }
+        .buff-market-tabs {
+            display: flex;
+            gap: 0.35rem;
+            margin-top: 1rem;
+        }
+        .buff-market-tabs span {
+            background: #19232e;
+            border: 1px solid #303c49;
+            border-radius: 3px;
+            color: #c7d0dc !important;
+            font-size: 0.82rem;
+            font-weight: 800;
+            padding: 0.45rem 0.7rem;
+        }
+        .buff-market-tabs span:first-child {
+            background: #ffb23f;
+            border-color: #ffb23f;
+            color: #111820 !important;
         }
         .buff-statline {
             display: grid;
@@ -552,20 +646,46 @@ def inject_styles() -> None:
             padding: 0.28rem 0.7rem;
             font-size: 0.82rem;
         }
-        div[data-testid="stMetric"] {
-            background: linear-gradient(180deg, rgba(26, 34, 48, 0.95) 0%, rgba(18, 24, 34, 0.95) 100%);
-            border: 1px solid rgba(95, 111, 142, 0.35);
-            border-radius: 8px;
-            padding: 0.85rem 0.9rem;
+        .buff-kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 0.75rem;
+            margin: 1rem 0 1.1rem;
         }
-        div[data-testid="stMetricLabel"] {
-            color: var(--muted) !important;
+        .buff-kpi {
+            min-height: 92px;
+            background: #111820;
+            border: 1px solid #24303c;
+            border-radius: 4px;
+            padding: 0.9rem;
+            box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
         }
-        div[data-testid="stMetricValue"] {
-            color: var(--text) !important;
+        .buff-kpi-label {
+            color: #ffffff !important;
+            font-size: 0.96rem;
+            font-weight: 800;
+            margin-bottom: 0.55rem;
         }
-        div[data-testid="stMetricDelta"] {
-            color: var(--soft) !important;
+        .buff-kpi-value {
+            color: #ffffff !important;
+            font-size: 1.42rem;
+            font-weight: 500;
+            line-height: 1.12;
+            overflow-wrap: anywhere;
+        }
+        .buff-kpi-delta {
+            display: inline-flex;
+            align-items: center;
+            color: #ffffff !important;
+            background: rgba(73, 160, 120, 0.42);
+            border-radius: 999px;
+            font-size: 0.86rem;
+            font-weight: 800;
+            margin-top: 0.55rem;
+            padding: 0.28rem 0.55rem;
+        }
+        .buff-kpi-delta-down {
+            background: rgba(139, 65, 82, 0.54);
         }
         div[data-baseweb="input"] > div,
         div[data-baseweb="select"] > div {
@@ -584,10 +704,10 @@ def inject_styles() -> None:
             gap: 0.6rem;
         }
         div[role="radiogroup"] label {
-            background: rgba(79, 111, 182, 0.12);
-            border: 1px solid rgba(91, 122, 191, 0.32);
+            background: #111820;
+            border: 1px solid #303c49;
             padding: 0.55rem 0.85rem;
-            border-radius: 8px;
+            border-radius: 4px;
         }
         div[role="radiogroup"] label p {
             color: var(--soft) !important;
@@ -616,6 +736,16 @@ def inject_styles() -> None:
         section[data-testid="stSidebar"] {
             background: #0e1623;
             border-right: 1px solid rgba(132, 150, 178, 0.18);
+        }
+        @media (min-width: 900px) {
+            section[data-testid="stSidebar"] {
+                min-width: 19rem !important;
+                transform: none !important;
+                width: 19rem !important;
+            }
+            button[data-testid="stExpandSidebarButton"] {
+                display: none !important;
+            }
         }
         section[data-testid="stSidebar"] > div {
             padding-top: 1.1rem;
@@ -647,17 +777,17 @@ def inject_styles() -> None:
             justify-content: space-between;
             gap: 1rem;
             align-items: flex-start;
-            background: #111a28;
-            border: 1px solid rgba(132, 150, 178, 0.22);
-            border-radius: 14px;
-            padding: 1.05rem 1.15rem;
+            background: #111820;
+            border: 1px solid #24303c;
+            border-radius: 4px;
+            padding: 1rem 1.15rem;
             margin-bottom: 1rem;
             box-shadow: 0 18px 40px rgba(0, 0, 0, 0.24);
         }
         .buff-header h1 {
             margin: 0;
             color: #f5f7fb !important;
-            font-size: clamp(1.55rem, 2vw, 2.25rem);
+            font-size: 1.55rem;
             letter-spacing: 0;
         }
         .buff-header p {
@@ -672,7 +802,7 @@ def inject_styles() -> None:
             background: rgba(73, 160, 120, 0.12);
             color: #9be7c4 !important;
             border-radius: 999px;
-            padding: 0.35rem 0.65rem;
+            padding: 0.42rem 0.7rem;
             white-space: nowrap;
             font-size: 0.82rem;
             font-weight: 700;
@@ -687,7 +817,7 @@ def inject_styles() -> None:
             justify-content: space-between;
             align-items: center;
             gap: 1rem;
-            margin: 1.15rem 0 0.55rem;
+            margin: 0.9rem 0 0.55rem;
         }
         .buff-section-title h3 {
             margin: 0;
@@ -751,8 +881,13 @@ def inject_styles() -> None:
             .buff-grid {
                 grid-template-columns: 1fr;
             }
+            .buff-price-panel {
+                border-left: 0;
+                border-top: 1px solid #24303c;
+            }
+            .buff-kpi-grid,
             .buff-statline {
-                grid-template-columns: 1fr;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
             }
             .buff-image-card {
                 min-height: 240px;
@@ -766,6 +901,12 @@ def inject_styles() -> None:
             }
             .buff-header {
                 flex-direction: column;
+            }
+        }
+        @media (max-width: 720px) {
+            .buff-kpi-grid,
+            .buff-submeta {
+                grid-template-columns: 1fr;
             }
         }
         </style>
@@ -981,7 +1122,7 @@ sell_stock = int(cast(Any, latest["Listings"])) if pd.notna(latest["Listings"]) 
 knife_category = family_selected.split("|")[0].strip()
 goods_id = str(latest.get("Goods ID") or "N/A")
 live_listing: dict[str, object] = {}
-if os.getenv("BUFF_APP_LIVE_LISTINGS", "1").strip().lower() in {"1", "true", "yes", "on"}:
+if os.getenv("BUFF_APP_LIVE_LISTINGS", "0").strip().lower() in {"1", "true", "yes", "on"}:
     live_listing = live_buff_listing(family_selected, condition_selected, knife_category)
     if live_listing.get("status") == "live":
         sell_stock = int(cast(Any, live_listing.get("listings") or 0))
@@ -995,7 +1136,7 @@ live_status = str(
     live_listing.get("status")
     or (
         "disabled"
-        if os.getenv("BUFF_APP_LIVE_LISTINGS", "1").strip().lower()
+        if os.getenv("BUFF_APP_LIVE_LISTINGS", "0").strip().lower()
         not in {"1", "true", "yes", "on"}
         else "not checked"
     )
@@ -1003,29 +1144,56 @@ live_status = str(
 live_checked = str(live_listing.get("checked_at") or "N/A")
 status_class = "" if live_status == "live" else " buff-status-warn"
 last_update = latest["Timestamp"].strftime("%Y-%m-%d %H:%M UTC")
+latest_price_label = money(latest["Price"])
+reference_price_label = money(reference_price)
+sell_stock_label = whole(sell_stock)
+buy_orders_label = whole(buy_orders)
+condition_label = html.escape(condition_selected)
+family_label = html.escape(family_selected)
+knife_label = html.escape(knife_category)
+goods_id_label = html.escape(goods_id)
+live_status_label = html.escape(live_status)
+last_update_label = html.escape(last_update)
+live_checked_label = html.escape(live_checked)
+image_html = (
+    f'<img class="buff-knife-art" src="{html.escape(image_url)}" alt="{family_label}">'
+    if image_url
+    else '<div style="color:#aab6ca;">No image available</div>'
+)
 
 st.markdown(
     f"""
     <div class="buff-header">
       <div>
-        <h1>BUFF163 Price Analytics</h1>
-        <p>{family_selected} | {condition_selected} | {knife_category} | Goods ID {goods_id}</p>
-        <p>Last update: {last_update} | Checked: {live_checked} | Auto refresh: {max(30, REFRESH_SECONDS) // 60} min</p>
+        <h1>BUFF163 Market Console</h1>
+        <p>{family_label} | {condition_label} | {knife_label} | Goods ID {goods_id_label}</p>
+        <p>Last update: {last_update_label} | Checked: {live_checked_label} | Auto refresh: {max(30, REFRESH_SECONDS) // 60} min</p>
       </div>
-      <div class="buff-status{status_class}">Market {live_status}</div>
+      <div class="buff-status{status_class}">Market {live_status_label}</div>
     </div>
     <div class="buff-hero">
       <div class="buff-grid">
         <div class="buff-image-card">
-          {f'<img class="buff-knife-art" src="{image_url}" alt="{family_selected}">' if image_url else '<div style="color:#aab6ca;">No image available</div>'}
+          {image_html}
         </div>
-        <div>
-          <h1 class="buff-title">{family_selected}</h1>
-          <div class="buff-submeta">
-            <span>Condition | {condition_selected}</span>
-            <span>Listings | {sell_stock if sell_stock else 'N/A'} ({listing_source})</span>
-            <span>Buy orders | {buy_orders}</span>
+        <div class="buff-item-main">
+          <div class="buff-market-tags">
+            <span>CS2</span><span>{knife_label}</span><span>{condition_label}</span>
           </div>
+          <h1 class="buff-title">{family_label}</h1>
+          <div class="buff-submeta">
+            <span>Condition<br><strong>{condition_label}</strong></span>
+            <span>Sell listings<br><strong>{sell_stock_label}</strong></span>
+            <span>Buy orders<br><strong>{buy_orders_label}</strong></span>
+          </div>
+          <div class="buff-market-tabs"><span>Selling</span><span>Buy Orders</span><span>History</span></div>
+        </div>
+        <div class="buff-price-panel">
+          <div class="buff-price-label">Lowest sell order</div>
+          <div class="buff-price-value">{latest_price_label}</div>
+          <div class="buff-price-row"><span>Reference</span><strong>{reference_price_label}</strong></div>
+          <div class="buff-price-row"><span>Source</span><strong>{html.escape(listing_source)}</strong></div>
+          <div class="buff-price-row"><span>Updated</span><strong>{last_update_label}</strong></div>
         </div>
       </div>
     </div>
@@ -1046,13 +1214,14 @@ daily_df = daily_df.groupby("Day", as_index=False).agg(
 )
 daily_df["Day"] = pd.to_datetime(daily_df["Day"])
 daily_df["Moving Average"] = daily_df["Price"].rolling(7, min_periods=1).mean()
+daily_df["ListingsChart"] = pd.to_numeric(daily_df["Listings"], errors="coerce").fillna(0)
 high_point = daily_df[daily_df["Price"] == daily_df["Price"].max()]
 low_point = daily_df[daily_df["Price"] == daily_df["Price"].min()]
 chart_tooltip = [
     alt.Tooltip("Day:T", title="Date"),
     alt.Tooltip("Price:Q", title="Avg Price", format=",.2f"),
     alt.Tooltip("Moving Average:Q", title="7D MA", format=",.2f"),
-    alt.Tooltip("Listings:Q", title="Listings", format=",.0f"),
+    alt.Tooltip("ListingsChart:Q", title="Listings", format=",.0f"),
     alt.Tooltip("BuyOrders:Q", title="Buy Orders", format=",.0f"),
 ]
 
@@ -1065,6 +1234,7 @@ price_chart = (
             "Price:Q",
             title="Price (CNY)",
             axis=alt.Axis(labelColor="#9eabc0", titleColor="#c6cfdd"),
+            scale=alt.Scale(zero=False),
         ),
         tooltip=chart_tooltip,
     )
@@ -1073,15 +1243,39 @@ price_chart = (
 moving_average = (
     alt.Chart(daily_df)
     .mark_line(color="#49a078", interpolate="monotone", strokeDash=[6, 4], strokeWidth=2)
-    .encode(x="Day:T", y=alt.Y("Moving Average:Q", axis=None), tooltip=chart_tooltip)
+    .encode(
+        x="Day:T",
+        y=alt.Y(
+            "Moving Average:Q",
+            axis=None,
+            scale=alt.Scale(zero=False),
+        ),
+        tooltip=chart_tooltip,
+    )
 )
 extreme_points = alt.layer(
     alt.Chart(high_point)
     .mark_point(color="#ff6b6b", filled=True, size=90)
-    .encode(x="Day:T", y=alt.Y("Price:Q", axis=None), tooltip=chart_tooltip),
+    .encode(
+        x="Day:T",
+        y=alt.Y(
+            "Price:Q",
+            axis=None,
+            scale=alt.Scale(zero=False),
+        ),
+        tooltip=chart_tooltip,
+    ),
     alt.Chart(low_point)
     .mark_point(color="#6dd6ff", filled=True, size=90)
-    .encode(x="Day:T", y=alt.Y("Price:Q", axis=None), tooltip=chart_tooltip),
+    .encode(
+        x="Day:T",
+        y=alt.Y(
+            "Price:Q",
+            axis=None,
+            scale=alt.Scale(zero=False),
+        ),
+        tooltip=chart_tooltip,
+    ),
 )
 stock_chart = (
     alt.Chart(daily_df)
@@ -1089,7 +1283,7 @@ stock_chart = (
     .encode(
         x=alt.X("Day:T", title="Date", axis=alt.Axis(labelColor="#9eabc0", titleColor="#c6cfdd")),
         y=alt.Y(
-            "Listings:Q",
+            "ListingsChart:Q",
             title="Sell Stock",
             axis=alt.Axis(labelColor="#9eabc0", titleColor="#c6cfdd"),
         ),
@@ -1104,7 +1298,7 @@ stock_overlay = (
     .encode(
         x=alt.X("Day:T", title="Date"),
         y=alt.Y(
-            "Listings:Q",
+            "ListingsChart:Q",
             title="Sell Stock",
             axis=alt.Axis(orient="right", labelColor="#aab6ca", titleColor="#aab6ca"),
         ),
@@ -1121,19 +1315,7 @@ left, right = st.columns((2.2, 1))
 
 with left:
     section_title("Price Trend", "Daily average, 7-day moving average, and day-end stock")
-    chart_mode = st.radio(
-        "Chart mode",
-        ("Combined (Price + Stock)", "Stacked (Price above Stock)"),
-        horizontal=True,
-        label_visibility="collapsed",
-    )
-    if chart_mode.startswith("Combined"):
-        st.altair_chart(chart_surface(combined_chart), width="stretch")
-    else:
-        st.altair_chart(
-            chart_surface((price_layers & stock_chart).resolve_scale(x="shared")),
-            width="stretch",
-        )
+    st.altair_chart(chart_surface(combined_chart), width="stretch")
 
 with right:
     summary = (
