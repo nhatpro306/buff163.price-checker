@@ -3,5 +3,14 @@ __pycache__/
 .venv/
 .env
 .git/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.aider*
+AGENTS.md
+docs/
+*.sqlite3
 page_meta_cache.sqlite3
 credentials.json
+steam_*_cache.json
+importtime.log
