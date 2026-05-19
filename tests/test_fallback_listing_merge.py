@@ -2,7 +2,7 @@ import unittest
 
 import pandas as pd
 
-from app_data_utils import filter_fallback_overrides_same_day
+from app_data_utils import filter_depthless_fallback_rows, filter_fallback_overrides_same_day
 
 
 class FallbackListingMergeTests(unittest.TestCase):
@@ -41,6 +41,19 @@ class FallbackListingMergeTests(unittest.TestCase):
 
         self.assertEqual(len(kept), 1)
         self.assertEqual(str(kept.iloc[0]["Family"]), "Karambit | Doppler")
+
+    def test_depthless_fallback_rows_are_dropped(self) -> None:
+        fallback = pd.DataFrame(
+            [
+                {"Family": "Bayonet", "Listings": 0, "Buy Orders": 0},
+                {"Family": "Survival Knife", "Listings": 3, "Buy Orders": 0},
+                {"Family": "Karambit", "Listings": 0, "Buy Orders": 2},
+            ]
+        )
+
+        kept = filter_depthless_fallback_rows(fallback)
+
+        self.assertEqual(kept["Family"].tolist(), ["Survival Knife", "Karambit"])
 
 
 if __name__ == "__main__":

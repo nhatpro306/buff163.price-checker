@@ -13,6 +13,7 @@ from streamlit_autorefresh import st_autorefresh
 from app_charts import chart_surface, daily_market_frame, price_history_chart
 from app_data_utils import (
     choose_image_url,
+    filter_depthless_fallback_rows,
     filter_fallback_overrides_same_day,
     filter_high_value_families,
     load_app_frames,
@@ -101,6 +102,7 @@ def merge_fallback_history(history: pd.DataFrame) -> pd.DataFrame:
     except Exception:
         return history
     if history.empty:
+        fallback = filter_depthless_fallback_rows(fallback)
         debug_log(f"ui fallback_merge history=0 fallback={len(fallback)} final={len(fallback)}")
         return fallback
     fallback = fallback.copy()
@@ -125,6 +127,7 @@ def merge_fallback_history(history: pd.DataFrame) -> pd.DataFrame:
         fallback = fallback.drop(columns=["_Hist Listings", "_Hist Buy Orders"])
     fallback_before_filter = len(fallback)
     fallback = filter_fallback_overrides_same_day(history, fallback)
+    fallback = filter_depthless_fallback_rows(fallback)
     fallback["_Fallback Current"] = 1
     history["_Fallback Current"] = 0
     merged = pd.concat([history, fallback], ignore_index=True)
@@ -835,6 +838,31 @@ def inject_styles() -> None:
             padding: 0.75rem;
             box-shadow: 0 16px 34px rgba(0, 0, 0, 0.22);
         }
+        .chart-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.65rem 1rem;
+            margin: 0 0 0.75rem;
+        }
+        .chart-legend span {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            color: #aeb9ca !important;
+            font-size: 0.82rem;
+            font-weight: 700;
+        }
+        .chart-legend i {
+            width: 1.6rem;
+            height: 0.22rem;
+            border-radius: 999px;
+            display: inline-block;
+        }
+        .legend-price { background: #f0a23b; }
+        .legend-ma { background: #49a078; border-top: 2px dashed #49a078; height: 0 !important; }
+        .legend-stock { background: #5f7bd0; }
+        .legend-high { background: #ff6b6b; }
+        .legend-low { background: #6dd6ff; }
         .signal-grid {
             display: grid;
             grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1215,6 +1243,18 @@ chart_col, activity_col = st.columns((2.1, 1))
 with chart_col:
     section_title("Price History", "Daily average, 7-day moving average, and liquidity overlay")
     st.markdown('<div class="chart-shell">', unsafe_allow_html=True)
+    st.markdown(
+        """
+        <div class="chart-legend">
+          <span><i class="legend-price"></i>Price</span>
+          <span><i class="legend-ma"></i>7D MA</span>
+          <span><i class="legend-stock"></i>Sell stock</span>
+          <span><i class="legend-high"></i>High point</span>
+          <span><i class="legend-low"></i>Low point</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     st.altair_chart(chart_surface(combined_chart), width="stretch")
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -1302,103 +1342,3 @@ else:
         pd.to_numeric(sell_view["Observed Orders"], errors="coerce").fillna(0).astype(int)
     )
     st.dataframe(format_market_table(sell_view.head(25)), width="stretch", hide_index=True)
-
-section_title("Raw Data", "Expandable source tables for audits and demos")
-with st.expander("Condition Catalog"):
-    if "load_condition_catalog" not in st.session_state:
-        st.session_state["load_condition_catalog"] = False
-    if st.button("Load Condition Catalog"):
-        st.session_state["load_condition_catalog"] = True
-    if st.session_state["load_condition_catalog"] and catalog_df.empty:
-        with st.spinner("Loading condition catalog..."):
-            catalog_df = load_sheet_records(CATALOG_SHEET_NAME)
-    if catalog_df.empty:
-        empty_state("Catalog not loaded", "Click Load Condition Catalog to fetch condition rows.")
-    else:
-        catalog_df["Price"] = pd.to_numeric(catalog_df["Price"], errors="coerce")
-        catalog_df["Listings"] = pd.to_numeric(catalog_df["Listings"], errors="coerce")
-        catalog_df["Buy Orders"] = pd.to_numeric(catalog_df["Buy Orders"], errors="coerce")
-        catalog_df["Condition"] = catalog_df["Condition"].fillna("Unknown").astype(str)
-        family_catalog = (
-            catalog_df[catalog_df["Family"] == family_selected]
-            .assign(
-                _sort_key=lambda frame: frame["Condition"].map(
-                    lambda value: CONDITION_ORDER.get(str(value), 50)
-                )
-            )
-            .sort_values(["_sort_key", "Condition"])
-            .drop(columns=["_sort_key"])
-        )
-        family_catalog["Listings"] = family_catalog["Listings"].fillna(0).astype(int)
-        family_catalog["Buy Orders"] = family_catalog["Buy Orders"].fillna(0).astype(int)
-        table = family_catalog[
-            ["Skin Name", "Condition", "Price", "Listings", "Buy Orders", "Goods ID"]
-        ]
-        if table.empty:
-            empty_state("No catalog rows for this family", "Select another family or reload data.")
-        else:
-            st.dataframe(format_market_table(table), width="stretch", hide_index=True)
-
-with st.expander("Forecast Data"):
-    if forecast_df.empty:
-        empty_state("Forecast not loaded", "No forecast rows are available.")
-    else:
-        show_cols = [
-            col
-            for col in (
-                "Forecast Date",
-                "Skin Name",
-                "Predicted Price",
-                "Predicted Listings",
-                "Model",
-            )
-            if col in forecast_df.columns
-        ]
-        st.dataframe(
-            format_market_table(forecast_df[show_cols].sort_values(show_cols[0])),
-            width="stretch",
-            hide_index=True,
-        )
-
-with st.expander("Full Catalog"):
-    if "load_full_catalog" not in st.session_state:
-        st.session_state["load_full_catalog"] = False
-    if st.button("Load Full Catalog"):
-        st.session_state["load_full_catalog"] = True
-    st.caption("This sheet can be large; loading on demand keeps the app fast.")
-    if st.session_state["load_full_catalog"] and all_catalog_df.empty:
-        with st.spinner("Loading full catalog..."):
-            all_catalog_df = load_sheet_records(ALL_CATALOG_SHEET_NAME)
-    if all_catalog_df.empty:
-        empty_state("Full catalog not loaded", "Click Load Full Catalog to fetch the larger sheet.")
-    else:
-        for numeric_col in ("Price", "Listings", "Buy Orders", "Reference Price"):
-            if numeric_col in all_catalog_df.columns:
-                all_catalog_df[numeric_col] = pd.to_numeric(
-                    all_catalog_df[numeric_col], errors="coerce"
-                )
-        all_catalog_df["Family"] = all_catalog_df.get("Family", "").fillna("").astype(str)
-        scoped = all_catalog_df[all_catalog_df["Family"] == family_selected].copy()
-        catalog_cols = [
-            c
-            for c in (
-                "Timestamp",
-                "Skin Name",
-                "Condition",
-                "Price",
-                "Listings",
-                "Buy Orders",
-                "Reference Price",
-                "Goods ID",
-                "Goods URL",
-                "Image URL",
-            )
-            if c in scoped.columns
-        ]
-        table = scoped[catalog_cols].sort_values(["Price"], ascending=False, na_position="last")
-        if table.empty:
-            empty_state(
-                "No full catalog rows for this family", "Select another family or reload data."
-            )
-        else:
-            st.dataframe(format_market_table(table), width="stretch", hide_index=True)

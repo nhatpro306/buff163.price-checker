@@ -119,3 +119,12 @@ def filter_fallback_overrides_same_day(
         for fam, cond, day in zip(fb["Family"], fb["Condition"], fb["__day"])
     ]
     return fb.loc[mask].drop(columns=["__day"])
+
+
+def filter_depthless_fallback_rows(fallback: pd.DataFrame) -> pd.DataFrame:
+    if fallback.empty:
+        return fallback.copy()
+    frame = fallback.copy()
+    listings = pd.to_numeric(frame.get("Listings"), errors="coerce").fillna(0)
+    buy_orders = pd.to_numeric(frame.get("Buy Orders"), errors="coerce").fillna(0)
+    return frame[(listings > 0) | (buy_orders > 0)].copy()
