@@ -24,6 +24,17 @@ from src.storage.sqlite import sqlite_load_history_frame as sqlite_load_history_
 from src.storage.sqlite import sqlite_upsert_snapshot as sqlite_upsert_snapshot
 from src.storage.sqlite import sqlite_write_snapshots as sqlite_write_snapshots
 
+from src.storage.base import StorageBackendBase as StorageBackendBase
+from src.storage.factory import StorageBackend as StorageBackend
+from src.storage.factory import get_storage_backend as get_storage_backend
+from src.storage.sheets_store import SheetsStore as SheetsStore
+from src.storage.sqlite_store import SqliteStore as SqliteStore
+
+try:
+    from src.storage.postgres_store import PostgresStore as PostgresStore
+except ImportError:  # pragma: no cover - psycopg2 optional
+    PostgresStore = None  # type: ignore[assignment,misc]
+
 
 class PageMetaCache:
     def __init__(self, db_path: str = "page_meta_cache.sqlite3") -> None:
@@ -66,6 +77,12 @@ class PageMetaCache:
 
 __all__ = [
     "PageMetaCache",
+    "StorageBackend",
+    "StorageBackendBase",
+    "get_storage_backend",
+    "SheetsStore",
+    "SqliteStore",
+    "PostgresStore",
     "SheetStore",
     "append_history",
     "credentials_from_info",
