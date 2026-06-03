@@ -14,19 +14,13 @@ import os
 from typing import Any
 
 from src.orchestrator import run
+from src.redaction import redact_secrets
 from src.results import ScrapeRunSummary
+from src.secrets import hydrate_secrets
 
-# Env var names that may hold secrets; their values are scrubbed from any
-# error message before it leaves the process. Full redaction helper arrives
-# in the secrets-hardening phase; this is the minimal Lambda-safe version.
-_SECRET_ENV_KEYS = (
-    "DATABASE_URL",
-    "BUFF_COOKIE",
-    "GSHEET_CREDS_JSON",
-    "GSHEET_CREDS",
-    "GOOGLE_CREDENTIALS_JSON",
-    "DISCORD_WEBHOOK_URL",
-)
+# Secrets resolved (env or Secrets Manager ARN) before a run so downstream
+# os.getenv() callers see them.
+_HYDRATE = ("DATABASE_URL", "BUFF_COOKIE")
 
 
 def _running_in_lambda() -> bool:
@@ -39,16 +33,6 @@ def _ensure_writable_paths() -> None:
     if _running_in_lambda():
         os.environ.setdefault("BUFF_SQLITE_PATH", "/tmp/buff163.sqlite3")
         os.environ.setdefault("BUFF_PAGE_META_CACHE_PATH", "/tmp/page_meta_cache.sqlite3")
-
-
-def _scrub(message: str) -> str:
-    """Replace any known secret value found in a message with '***'."""
-    scrubbed = message
-    for key in _SECRET_ENV_KEYS:
-        value = os.getenv(key)
-        if value and value in scrubbed:
-            scrubbed = scrubbed.replace(value, "***")
-    return scrubbed
 
 
 def _summary_to_dict(summary: ScrapeRunSummary) -> dict[str, Any]:
@@ -73,6 +57,8 @@ def lambda_handler(event: dict[str, Any] | None = None, context: Any = None) -> 
     ``ok=False`` so EventBridge/CloudWatch see a clear, secret-free message.
     """
     _ensure_writable_paths()
+    # Pull DATABASE_URL / BUFF_COOKIE from Secrets Manager if only ARNs are set.
+    hydrate_secrets(_HYDRATE)
     try:
         summary = run()
     except Exception as exc:  # noqa: BLE001 - boundary: convert to safe result
@@ -80,7 +66,7 @@ def lambda_handler(event: dict[str, Any] | None = None, context: Any = None) -> 
             "ok": False,
             "status": "failed",
             "error_type": exc.__class__.__name__,
-            "error_message": _scrub(str(exc))[:300],
+            "error_message": redact_secrets(str(exc))[:300],
         }
 
     if summary is None:
