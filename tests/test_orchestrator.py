@@ -46,14 +46,12 @@ def test_local_sqlite_writes_final_merged_snapshots(monkeypatch, tmp_path):
 
     conn = sqlite3.connect(db_path)
     try:
-        rows = conn.execute(
-            """
+        rows = conn.execute("""
             SELECT g.goods_id, s.listings
             FROM snapshots s
             JOIN goods g ON g.goods_id = s.goods_id
             ORDER BY g.goods_id
-            """
-        ).fetchall()
+            """).fetchall()
     finally:
         conn.close()
 

@@ -4,9 +4,12 @@ import json
 import sqlite3
 from datetime import UTC, datetime
 
+from src.storage.base import StorageBackendBase as StorageBackendBase
 from src.storage.credentials import credentials_from_info as credentials_from_info
 from src.storage.credentials import load_google_credentials as load_google_credentials
 from src.storage.credentials import resolve_credentials_path as resolve_credentials_path
+from src.storage.factory import StorageBackend as StorageBackend
+from src.storage.factory import get_storage_backend as get_storage_backend
 from src.storage.sheets import SheetStore as SheetStore
 from src.storage.sheets import append_history as append_history
 from src.storage.sheets import csgotrader_snapshots as csgotrader_snapshots
@@ -18,11 +21,18 @@ from src.storage.sheets import rebuild_catalog as rebuild_catalog
 from src.storage.sheets import rebuild_dashboard as rebuild_dashboard
 from src.storage.sheets import rebuild_forecast as rebuild_forecast
 from src.storage.sheets import rebuild_signals as rebuild_signals
+from src.storage.sheets_store import SheetsStore as SheetsStore
 from src.storage.sqlite import sqlite_connect as sqlite_connect
 from src.storage.sqlite import sqlite_init as sqlite_init
 from src.storage.sqlite import sqlite_load_history_frame as sqlite_load_history_frame
 from src.storage.sqlite import sqlite_upsert_snapshot as sqlite_upsert_snapshot
 from src.storage.sqlite import sqlite_write_snapshots as sqlite_write_snapshots
+from src.storage.sqlite_store import SqliteStore as SqliteStore
+
+try:
+    from src.storage.postgres_store import PostgresStore as PostgresStore
+except ImportError:  # pragma: no cover - psycopg2 optional
+    PostgresStore = None  # type: ignore[assignment,misc]
 
 
 class PageMetaCache:
@@ -66,6 +76,12 @@ class PageMetaCache:
 
 __all__ = [
     "PageMetaCache",
+    "StorageBackend",
+    "StorageBackendBase",
+    "get_storage_backend",
+    "SheetsStore",
+    "SqliteStore",
+    "PostgresStore",
     "SheetStore",
     "append_history",
     "credentials_from_info",

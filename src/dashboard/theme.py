@@ -723,4 +723,3 @@ def inject_styles() -> None:
         """,
         unsafe_allow_html=True,
     )
-
