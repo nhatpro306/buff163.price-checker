@@ -70,6 +70,23 @@ def test_lambda_handler_no_secret_keys_in_output():
         assert leaked not in blob
 
 
+def test_lambda_handler_health_check_mode():
+    with patch("handler.run_health_check", return_value={"ok": True, "status": "healthy"}) as hc:
+        with patch("handler.run", side_effect=AssertionError("must not scrape")):
+            out = handler.lambda_handler({"mode": "health_check"}, None)
+    assert out == {"ok": True, "status": "healthy"}
+    hc.assert_called_once()
+
+
+def test_lambda_handler_summary_includes_backend():
+    s = _summary(succeeded=2)
+    s.storage_backend = "postgres"
+    with patch("handler.run", return_value=s):
+        out = handler.lambda_handler({}, None)
+    assert out["storage_backend"] == "postgres"
+    assert out["invalid"] == out["skipped"]
+
+
 def test_ensure_writable_paths_only_in_lambda(monkeypatch):
     monkeypatch.delenv("AWS_LAMBDA_FUNCTION_NAME", raising=False)
     monkeypatch.delenv("BUFF_SQLITE_PATH", raising=False)

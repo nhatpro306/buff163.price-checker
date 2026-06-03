@@ -75,6 +75,7 @@ def run(migrate_only: bool = False) -> ScrapeRunSummary | None:
 
     client = BuffPriceClient()
     run_summary = ScrapeRunSummary.start()
+    run_summary.storage_backend = os.getenv("STORAGE_BACKEND", "sheets").strip().lower()
     timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
     min_price = float(os.getenv("BUFF_MIN_PRICE_CNY", "0"))
     try:

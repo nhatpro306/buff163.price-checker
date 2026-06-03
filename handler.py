@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from src.health import run_health_check
 from src.orchestrator import run
 from src.redaction import redact_secrets
 from src.results import ScrapeRunSummary
@@ -36,18 +37,9 @@ def _ensure_writable_paths() -> None:
 
 
 def _summary_to_dict(summary: ScrapeRunSummary) -> dict[str, Any]:
-    return {
-        "ok": summary.exit_code() == 0,
-        "status": summary.status,
-        "started_at": summary.started_at,
-        "finished_at": summary.finished_at,
-        "duration_seconds": round(summary.duration_seconds, 1),
-        "attempted": summary.attempted,
-        "succeeded": summary.succeeded,
-        "failed": summary.failed,
-        "skipped": summary.skipped,
-        "error_count": len(summary.errors),
-    }
+    body = summary.to_dict()
+    body["ok"] = summary.exit_code() == 0
+    return body
 
 
 def lambda_handler(event: dict[str, Any] | None = None, context: Any = None) -> dict[str, Any]:
@@ -59,6 +51,12 @@ def lambda_handler(event: dict[str, Any] | None = None, context: Any = None) -> 
     _ensure_writable_paths()
     # Pull DATABASE_URL / BUFF_COOKIE from Secrets Manager if only ARNs are set.
     hydrate_secrets(_HYDRATE)
+
+    # Health-check mode: verify config/storage without scraping.
+    event = event or {}
+    if event.get("mode") == "health_check" or os.getenv("BUFF_HEALTH_CHECK") == "1":
+        return run_health_check()
+
     try:
         summary = run()
     except Exception as exc:  # noqa: BLE001 - boundary: convert to safe result
