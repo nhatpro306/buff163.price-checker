@@ -8,6 +8,7 @@ from market_models import MarketSnapshot
 from market_utils import debug_log, env_flag
 from src.analysis import PriceAnalysisAgent
 from src.client import BuffPriceClient
+from src.results import ITEM_SKIPPED, ITEM_SUCCESS, ScrapeItemResult, ScrapeRunSummary
 from src.settings import get_search_keywords, get_seed_goods_ids
 from src.snapshot_merge import (
     enrich_fallback_snapshots_with_latest_depth,
@@ -29,9 +30,10 @@ from src.storage import (
     sqlite_load_history_frame,
     sqlite_write_snapshots,
 )
+from src.validation import validate_snapshot
 
 
-def run(migrate_only: bool = False) -> None:
+def run(migrate_only: bool = False) -> ScrapeRunSummary | None:
     sqlite_path = os.getenv("BUFF_SQLITE_PATH", DEFAULT_SQLITE_PATH).strip()
     enable_sqlite = env_flag("BUFF_WRITE_SQLITE", False)
     write_sheets = env_flag("BUFF_WRITE_SHEETS", not enable_sqlite)
@@ -69,9 +71,10 @@ def run(migrate_only: bool = False) -> None:
         if env_flag("BUFF_ENABLE_FORECAST", True):
             rebuild_forecast(store, history)
         print("Migration-only run completed.")
-        return
+        return None
 
     client = BuffPriceClient()
+    run_summary = ScrapeRunSummary.start()
     timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
     min_price = float(os.getenv("BUFF_MIN_PRICE_CNY", "0"))
     try:
@@ -155,6 +158,36 @@ def run(migrate_only: bool = False) -> None:
         if store is not None:
             rebuild_all_catalog(store, full_snapshots, timestamp)
 
+    # Validate business data after a successful fetch. Malformed snapshots are
+    # skipped (logged, not stored) so one bad goods_id never poisons storage.
+    valid_snapshots: list[MarketSnapshot] = []
+    for snapshot in snapshots:
+        problems = validate_snapshot(snapshot)
+        if problems:
+            reason = "; ".join(problems)
+            run_summary.record(
+                ScrapeItemResult(
+                    goods_id=snapshot.goods_id,
+                    status=ITEM_SKIPPED,
+                    error_type="validation",
+                    error_message=reason,
+                )
+            )
+            debug_log(f"pipeline skip_invalid goods_id={snapshot.goods_id} reason={reason}")
+            continue
+        run_summary.record(
+            ScrapeItemResult(
+                goods_id=snapshot.goods_id,
+                status=ITEM_SUCCESS,
+                item_name=snapshot.skin_name,
+                price=snapshot.price,
+                listing_count=snapshot.listings,
+                scraped_at=timestamp,
+            )
+        )
+        valid_snapshots.append(snapshot)
+    snapshots = valid_snapshots
+
     if enable_sqlite and sqlite_path and write_sheets:
         sqlite_write_snapshots(sqlite_path, snapshots, timestamp)
 
@@ -165,7 +198,9 @@ def run(migrate_only: bool = False) -> None:
             f"Collected {len(snapshots)} high-value snapshots for {', '.join(track_keywords)} "
             f"(>= {min_price:.0f} CNY, pages={high_value_pages})."
         )
-        return
+        run_summary.finalize()
+        print(run_summary.log_line())
+        return run_summary
 
     if store is None:
         raise ValueError("Google Sheets output is enabled but no sheet store is configured.")
@@ -185,3 +220,6 @@ def run(migrate_only: bool = False) -> None:
         f"Collected {len(snapshots)} high-value snapshots for {', '.join(track_keywords)} "
         f"(>= {min_price:.0f} CNY, pages={high_value_pages})."
     )
+    run_summary.finalize()
+    print(run_summary.log_line())
+    return run_summary

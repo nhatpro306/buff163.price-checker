@@ -4,13 +4,17 @@ import time
 from typing import Any
 
 import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
 from market_models import MarketSnapshot
 from src.async_client import AsyncBuffPriceClient
-from src.buff_http import buff_headers, max_429_attempts, request_timeout
+from src.buff_http import buff_headers, request_timeout
 from src.page_parser import parse_goods_page_metadata
+from src.retry import (
+    backoff_base_seconds,
+    compute_backoff,
+    is_retryable_status,
+)
+from src.retry import max_retries as _max_retries
 from src.snapshots import build_market_item_snapshot, build_sell_order_snapshot
 
 
@@ -19,31 +23,49 @@ class BuffPriceClient:
     GOODS_MARKET_URL = "https://buff.163.com/api/market/goods"
     GOODS_PAGE_URL = "https://buff.163.com/goods/{goods_id}?from=market#tab=selling"
 
-    def __init__(self, timeout: int | None = None) -> None:
+    def __init__(
+        self,
+        timeout: int | None = None,
+        *,
+        max_retries: int | None = None,
+        backoff_base: float | None = None,
+    ) -> None:
         if timeout is None:
             timeout = request_timeout()
         self.timeout = timeout
+        # Retry budget = extra attempts after the first try. Transient HTTP
+        # failures and network errors are retried here (with backoff + jitter)
+        # so a temporary BUFF hiccup does not fail a scheduled run.
+        self.max_retries = max_retries if max_retries is not None else _max_retries()
+        self.backoff_base = backoff_base if backoff_base is not None else backoff_base_seconds()
         self.session = requests.Session()
         self.page_cache: dict[str, dict[str, Any]] = {}
-        # Retry safe GET requests so temporary BUFF failures do not fail scheduled runs.
-        retry = Retry(
-            total=2,
-            backoff_factor=0.7,
-            status_forcelist=(500, 502, 503, 504),
-            allowed_methods=("GET",),
-        )
-        self.session.mount("https://", HTTPAdapter(max_retries=retry))
         self.session.headers.update(buff_headers())
 
     def _get(self, url: str, **kwargs: Any) -> requests.Response:
-        max_attempts = max_429_attempts()
-        for attempt in range(max_attempts):
-            response = self.session.get(url, timeout=self.timeout, **kwargs)
-            if response.status_code != 429:
-                return response
-            backoff_seconds = min(2.0 + attempt * 1.5, 8.0)
-            time.sleep(backoff_seconds)
-        return response
+        # attempt 0 = first try; attempts 1..max_retries = retries.
+        last_exc: Exception | None = None
+        response: requests.Response | None = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                response = self.session.get(url, timeout=self.timeout, **kwargs)
+            except (requests.Timeout, requests.ConnectionError) as exc:
+                # Transient network failure: retry unless budget exhausted.
+                last_exc = exc
+                if attempt >= self.max_retries:
+                    raise
+                time.sleep(compute_backoff(attempt, self.backoff_base))
+                continue
+            # 4xx (e.g. 403/404) returned as-is so callers raise_for_status;
+            # only transient statuses are retried.
+            if is_retryable_status(response.status_code) and attempt < self.max_retries:
+                time.sleep(compute_backoff(attempt, self.backoff_base))
+                continue
+            return response
+        if response is not None:
+            return response
+        assert last_exc is not None
+        raise last_exc
 
     def fetch_sell_snapshot(
         self, goods_id: str, page_meta: dict[str, Any] | None = None

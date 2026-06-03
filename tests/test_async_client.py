@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any, cast
 
 from src.client import AsyncBuffPriceClient
 
@@ -28,6 +29,6 @@ def test_fetch_many_returns_snapshots(mock_buff_response):
         async def aclose(self):
             return None
 
-    client._client = _MockAsync()
+    client._client = cast(Any, _MockAsync())
     out = asyncio.run(client.fetch_many(["1", "2", "3"], concurrency=2))
     assert len(out) == 3
