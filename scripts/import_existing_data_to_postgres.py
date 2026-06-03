@@ -28,7 +28,7 @@ def _check_database_url() -> None:
     if not os.getenv("DATABASE_URL", "").strip():
         print(
             "ERROR: DATABASE_URL is not set.\n"
-            "Example: export DATABASE_URL=postgresql://user:password@host:5432/dbname",
+            "Set DATABASE_URL from a secret manager or local environment file; never print or commit it.",
             file=sys.stderr,
         )
         sys.exit(1)

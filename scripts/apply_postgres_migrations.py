@@ -24,7 +24,7 @@ def main() -> None:
     if not os.getenv("DATABASE_URL", "").strip():
         print(
             "ERROR: DATABASE_URL is not set.\n"
-            "Example: export DATABASE_URL=postgresql://user:password@host:5432/dbname",
+            "Set DATABASE_URL from a secret manager or local environment file; never print or commit it.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -51,7 +51,7 @@ def main() -> None:
             apply_migration_file(str(sql_file))
         except Exception as exc:
             print(
-                f"ERROR applying {version}: {exc.__class__.__name__}: {exc}",
+                f"ERROR applying {version}: {exc.__class__.__name__}",
                 file=sys.stderr,
             )
             sys.exit(1)

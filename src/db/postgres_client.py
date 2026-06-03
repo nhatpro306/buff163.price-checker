@@ -27,8 +27,7 @@ def _database_url() -> str:
     if not url:
         raise ValueError(
             "DATABASE_URL environment variable is required for PostgreSQL storage. "
-            "Set it to a valid PostgreSQL connection string, e.g.: "
-            "postgresql://user:password@host:5432/dbname"
+            "Set it from a secret manager or local environment file; never print or commit it."
         )
     return url
 
