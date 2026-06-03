@@ -84,9 +84,9 @@ variable "extra_env" {
   description = "Additional non-secret environment variables for the Lambda."
   type        = map(string)
   default = {
-    STORAGE_BACKEND          = "postgres"
-    BUFF_REQUEST_TIMEOUT     = "15"
-    BUFF_MAX_RETRIES         = "3"
+    STORAGE_BACKEND           = "postgres"
+    BUFF_REQUEST_TIMEOUT      = "15"
+    BUFF_MAX_RETRIES          = "3"
     BUFF_BACKOFF_BASE_SECONDS = "1"
   }
 }

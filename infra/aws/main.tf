@@ -3,7 +3,7 @@ data "aws_region" "current" {}
 
 locals {
   account_id = data.aws_caller_identity.current.account_id
-  image_uri  = "${local.account_id}.dkr.ecr.${data.aws_region.current.name}.amazonaws.com/${var.ecr_repo_name}:${var.image_tag}"
+  image_uri  = "${local.account_id}.dkr.ecr.${data.aws_region.current.region}.amazonaws.com/${var.ecr_repo_name}:${var.image_tag}"
 
   # Secret-ARN env vars passed to the Lambda (values resolved at runtime by the
   # app via the Secrets Manager loader). Empty ARNs are omitted.
@@ -48,8 +48,8 @@ resource "aws_iam_role" "lambda" {
 data "aws_iam_policy_document" "lambda_permissions" {
   # Scoped log access to this function's log group only.
   statement {
-    sid     = "Logs"
-    actions = ["logs:CreateLogStream", "logs:PutLogEvents"]
+    sid       = "Logs"
+    actions   = ["logs:CreateLogStream", "logs:PutLogEvents"]
     resources = ["${aws_cloudwatch_log_group.lambda.arn}:*"]
   }
 
