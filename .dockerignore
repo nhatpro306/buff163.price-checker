@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 .venv/
 .env
+.env.*
 .git/
 .pytest_cache/
 .ruff_cache/
@@ -12,5 +13,11 @@ docs/
 *.sqlite3
 page_meta_cache.sqlite3
 credentials.json
+credentials.json.bak
+*.bak
+*.json.bak
 steam_*_cache.json
 importtime.log
+tests/
+.vercel/
+.serena/

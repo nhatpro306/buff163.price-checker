@@ -1,0 +1,19 @@
+# AWS Lambda container image for the BUFF163 scraper.
+# Base: official AWS Lambda Python 3.11 runtime.
+#
+# Build/run/deploy instructions: docs/aws-container-deploy.md
+# The Streamlit dashboard image is the separate top-level `Dockerfile`.
+FROM public.ecr.aws/lambda/python:3.11
+
+# Install runtime dependencies only (no dev tooling, no dashboard-only libs).
+COPY requirements-lambda.txt ${LAMBDA_TASK_ROOT}/
+RUN pip install --no-cache-dir -r ${LAMBDA_TASK_ROOT}/requirements-lambda.txt
+
+# Copy only the modules the scraper needs. .dockerignore plus this explicit
+# allowlist keep secrets, .env files, credentials, local DBs, tests, and the
+# dashboard out of the image.
+COPY handler.py main.py market_config.py market_models.py market_utils.py ${LAMBDA_TASK_ROOT}/
+COPY src ${LAMBDA_TASK_ROOT}/src
+
+# Lambda entrypoint: <module>.<function>
+CMD ["handler.lambda_handler"]
