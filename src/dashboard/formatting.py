@@ -14,6 +14,7 @@ def base_knife_type(value: object) -> str:
         return text.split(" ", 1)[1].strip() if " " in text else text
     return text
 
+
 def knife_tile_image(frame: pd.DataFrame) -> str:
     priority = (
         "Doppler",
