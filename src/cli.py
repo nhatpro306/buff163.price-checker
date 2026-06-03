@@ -10,7 +10,7 @@ def main() -> None:
     parser.add_argument("--migrate-only", action="store_true")
     args = parser.parse_args()
     try:
-        run(migrate_only=args.migrate_only)
+        summary = run(migrate_only=args.migrate_only)
     except FileNotFoundError as exc:
         print(f"Startup error: {exc}")
         print(
@@ -22,3 +22,8 @@ def main() -> None:
     except Exception as exc:
         print(f"Unhandled error: {exc.__class__.__name__}: {exc}")
         raise SystemExit(1)
+
+    # Cloud-safe exit: 0 on success/partial (at least one item, or nothing to
+    # do); 1 only when every attempted item failed.
+    if summary is not None:
+        raise SystemExit(summary.exit_code())
