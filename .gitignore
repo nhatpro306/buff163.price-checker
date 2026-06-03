@@ -189,3 +189,11 @@ credentials.json
 credentials.json.bak
 
 page_meta_cache.sqlite3
+
+# Terraform
+infra/**/.terraform/
+infra/**/*.tfstate
+infra/**/*.tfstate.*
+infra/**/terraform.tfvars
+infra/**/*.tfplan
+.terraform.lock.hcl

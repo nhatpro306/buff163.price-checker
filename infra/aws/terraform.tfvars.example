@@ -1,0 +1,21 @@
+# Copy to terraform.tfvars and edit. terraform.tfvars is git-ignored.
+# Do NOT put secret VALUES here — only ARNs of secrets created separately.
+
+aws_region           = "ap-southeast-1"
+ecr_repo_name        = "buff163-scraper"
+image_tag            = "latest"
+lambda_function_name = "buff163-scraper"
+lambda_memory_mb     = 1024
+lambda_timeout_seconds = 900
+
+schedule_expression = "rate(12 hours)"
+schedule_enabled    = true
+log_retention_days  = 30
+
+# ARNs of secrets you created in Secrets Manager (values never in TF state).
+# database_url_secret_arn = "arn:aws:secretsmanager:ap-southeast-1:<acct>:secret:buff163/DATABASE_URL-xxxxxx"
+# buff_cookie_secret_arn  = "arn:aws:secretsmanager:ap-southeast-1:<acct>:secret:buff163/BUFF_COOKIE-xxxxxx"
+# secret_arns = [
+#   "arn:aws:secretsmanager:ap-southeast-1:<acct>:secret:buff163/DATABASE_URL-xxxxxx",
+#   "arn:aws:secretsmanager:ap-southeast-1:<acct>:secret:buff163/BUFF_COOKIE-xxxxxx",
+# ]
