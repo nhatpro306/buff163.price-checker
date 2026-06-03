@@ -1,0 +1,11 @@
+# Runtime dependencies for the AWS Lambda scraper image.
+# Subset of requirements.txt: scraper + storage only. Excludes dev tooling
+# (pytest/ruff/black/mypy) and dashboard-only libs (streamlit/altair/
+# streamlit-autorefresh) to keep the image minimal.
+requests
+httpx
+pandas
+numpy
+gspread
+google-auth
+psycopg2-binary>=2.9,<3.0
