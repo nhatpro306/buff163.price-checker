@@ -11,6 +11,14 @@ locals {
     var.database_url_secret_arn == "" ? {} : { DATABASE_URL_SECRET_ARN = var.database_url_secret_arn },
     var.buff_cookie_secret_arn == "" ? {} : { BUFF_COOKIE_SECRET_ARN = var.buff_cookie_secret_arn },
   )
+
+  # Grant access to the ARNs used by the app, plus any explicitly listed extras.
+  # This prevents a deploy where *_SECRET_ARN env vars are set but IAM cannot
+  # read those same secrets.
+  effective_secret_arns = distinct(compact(concat(
+    var.secret_arns,
+    [var.database_url_secret_arn, var.buff_cookie_secret_arn],
+  )))
 }
 
 # --- ECR -------------------------------------------------------------------
@@ -53,13 +61,13 @@ data "aws_iam_policy_document" "lambda_permissions" {
     resources = ["${aws_cloudwatch_log_group.lambda.arn}:*"]
   }
 
-  # Read only the explicitly listed secrets.
+  # Read only the configured secrets.
   dynamic "statement" {
-    for_each = length(var.secret_arns) > 0 ? [1] : []
+    for_each = length(local.effective_secret_arns) > 0 ? [1] : []
     content {
       sid       = "ReadSecrets"
       actions   = ["secretsmanager:GetSecretValue"]
-      resources = var.secret_arns
+      resources = local.effective_secret_arns
     }
   }
 }

@@ -8,16 +8,17 @@ Package the scraper as a Lambda container image and push it to Amazon ECR.
 - `requirements-lambda.txt` — minimal runtime deps (no dev tooling, no
   dashboard-only libs).
 - `.dockerignore` — keeps secrets, `.env*`, credentials, `*.bak`, local DBs,
-  tests, and dashboard config out of the image.
+  tests, docs, and dashboard config out of the image.
 
 The Streamlit dashboard image remains the separate top-level `Dockerfile`.
 
 ## What is (not) in the image
 
-Included: `handler.py`, `main.py`, `market_*.py`, `src/`.
-Excluded: `.env*`, `credentials.json*`, `*.sqlite3`, `tests/`, `docs/`, `app.py`
-(dashboard), `.git/`. No secrets are baked in — they come from Secrets Manager
-at runtime.
+Included: `handler.py`, `main.py`, `market_*.py`, top-level scraper modules in
+`src/`, `src/db/`, and `src/storage/`.
+Excluded: `.env*`, credentials/service-account JSON, local DB files (`*.db`,
+`*.sqlite`, `*.sqlite3`), `tests/`, `docs/`, `app.py`, `src/dashboard/`, and
+`.git/`. No secrets are baked in — they come from Secrets Manager at runtime.
 
 ## Local build
 

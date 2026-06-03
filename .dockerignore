@@ -10,10 +10,15 @@ __pycache__/
 .aider*
 AGENTS.md
 docs/
+*.db
+*.sqlite
 *.sqlite3
 page_meta_cache.sqlite3
 credentials.json
 credentials.json.bak
+*credentials*.json
+service-account*.json
+service_account*.json
 *.bak
 *.json.bak
 steam_*_cache.json

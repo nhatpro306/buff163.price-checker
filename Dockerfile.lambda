@@ -10,10 +10,12 @@ COPY requirements-lambda.txt ${LAMBDA_TASK_ROOT}/
 RUN pip install --no-cache-dir -r ${LAMBDA_TASK_ROOT}/requirements-lambda.txt
 
 # Copy only the modules the scraper needs. .dockerignore plus this explicit
-# allowlist keep secrets, .env files, credentials, local DBs, tests, and the
-# dashboard out of the image.
+# allowlist keep secrets, .env files, credentials, local DBs, tests, docs, and
+# dashboard-only modules out of the image.
 COPY handler.py main.py market_config.py market_models.py market_utils.py ${LAMBDA_TASK_ROOT}/
-COPY src ${LAMBDA_TASK_ROOT}/src
+COPY src/*.py ${LAMBDA_TASK_ROOT}/src/
+COPY src/db ${LAMBDA_TASK_ROOT}/src/db
+COPY src/storage ${LAMBDA_TASK_ROOT}/src/storage
 
 # Lambda entrypoint: <module>.<function>
 CMD ["handler.lambda_handler"]

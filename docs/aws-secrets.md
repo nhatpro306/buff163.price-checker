@@ -41,8 +41,9 @@ returning them, so CloudWatch never sees a raw DSN, cookie, or webhook.
 - `.env.example` holds **placeholders only**. Real `.env` is git-ignored.
 - Never log secret values. Use `redact_secrets` on any message that could embed
   config (DSN errors, request context).
-- IAM grants the Lambda `secretsmanager:GetSecretValue` on **only** the listed
-  secret ARNs (`infra/aws/`), never `*`.
+- IAM grants the Lambda `secretsmanager:GetSecretValue` on **only** the
+  configured secret ARNs (`database_url_secret_arn`, `buff_cookie_secret_arn`,
+  plus optional `secret_arns` extras), never `*`.
 - Secret **values** never enter Terraform state — only ARNs are referenced.
 
 ## Creating the secrets (one-time)
@@ -55,7 +56,8 @@ aws secretsmanager create-secret --name buff163/BUFF_COOKIE \
 ```
 
 Then pass the resulting ARNs to Terraform (`database_url_secret_arn`,
-`buff_cookie_secret_arn`, `secret_arns`) — see `docs/aws-infra.md`.
+`buff_cookie_secret_arn`). Use `secret_arns` only for additional secrets; see
+`docs/aws-infra.md`.
 
 ## Rotation
 

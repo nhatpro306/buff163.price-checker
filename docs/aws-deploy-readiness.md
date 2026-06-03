@@ -95,27 +95,34 @@ Postgres path does not import or need them.
   duration limit). Do not switch to ECS unless bounded Lambda proves
   insufficient.
 
-## Deployment blockers (must address before deploy)
+## Implementation status after Phases 3-8
 
-1. **No Lambda handler.** Current entry is a CLI; Lambda needs
-   `handler.lambda_handler(event, context)`. → Phase 3.
-2. **Dockerfile is Streamlit-only.** Existing `Dockerfile` runs the dashboard,
-   not the scraper. Need a Lambda-runtime image with the handler as `CMD`.
-   → Phase 4.
-3. **`PageMetaCache` writable path** must be `/tmp` on Lambda. → verify Phase 3.
-4. **Secrets wiring** — Lambda must read secrets from Secrets Manager (env
-   injection or SDK fetch). → Phase 5/6.
-5. **No IaC** for ECR/Lambda/IAM/EventBridge. → Phase 5.
+- **Lambda handler:** implemented in `handler.py` as
+  `handler.lambda_handler(event, context)`. It calls `src.orchestrator.run()`,
+  returns a JSON-safe summary, redirects Lambda local-file defaults to `/tmp`,
+  supports health-check mode, and redacts fatal error messages.
+- **Container packaging:** implemented in `Dockerfile.lambda` with
+  `CMD ["handler.lambda_handler"]`; `.dockerignore` excludes secrets, local
+  DBs, test artifacts, docs, and cache files.
+- **Secrets wiring:** implemented through `src/secrets.py`, `src/redaction.py`,
+  and Terraform `*_SECRET_ARN` environment variables.
+- **IaC:** implemented under `infra/aws/` for ECR, Lambda, IAM, CloudWatch Logs,
+  and EventBridge Scheduler.
+- **Observability:** `ScrapeRunSummary` provides structured response fields and
+  a one-line CloudWatch-friendly run summary; health-check mode avoids real
+  scraping.
+- **Runbook:** `docs/aws-production-runbook.md` covers build, push, deploy,
+  manual test, CloudWatch logs, PostgreSQL verification, update, and rollback.
 
-## Next implementation steps
+## Remaining deployment validation
 
-- **Phase 3** — add `handler.lambda_handler` calling `orchestrator.run()`,
-  returning a JSON summary, no secrets in output; keep CLI working; ensure
-  writable cache path.
-- **Phase 4** — Lambda container `Dockerfile.lambda` + `.dockerignore`
-  (exclude `.env`, creds, local DBs).
-- **Phase 5** — IaC (Terraform/SAM) for ECR, Lambda, IAM least-privilege,
-  Secrets Manager access, CloudWatch, EventBridge Scheduler.
-- **Phase 6** — secrets/config hardening + redaction helper.
-- **Phase 7** — observability (structured summary, health-check mode).
-- **Phase 8** — production runbook.
+Before production use, verify:
+
+1. `docker build -f Dockerfile.lambda -t buff163-lambda:test .` succeeds on a
+   machine with Docker running.
+2. `terraform -chdir=infra/aws fmt -check` and
+   `terraform -chdir=infra/aws validate` pass after `terraform init`.
+3. A Lambda health-check invocation succeeds with the real Secrets Manager ARNs.
+4. A bounded real scrape finishes comfortably below Lambda's 900-second limit.
+   If the desired scrape scope cannot fit with margin, use the documented ECS
+   Fargate fallback.

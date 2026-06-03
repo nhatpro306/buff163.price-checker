@@ -67,8 +67,7 @@ terraform init
 terraform apply -target=aws_ecr_repository.scraper   # optional if repo exists
 terraform apply -var="image_tag=$TAG" \
   -var='database_url_secret_arn=arn:aws:secretsmanager:...:buff163/DATABASE_URL-xxxx' \
-  -var='buff_cookie_secret_arn=arn:aws:secretsmanager:...:buff163/BUFF_COOKIE-xxxx' \
-  -var='secret_arns=["arn:...DATABASE_URL-xxxx","arn:...BUFF_COOKIE-xxxx"]'
+  -var='buff_cookie_secret_arn=arn:aws:secretsmanager:...:buff163/BUFF_COOKIE-xxxx'
 ```
 
 `extra_env` defaults set `STORAGE_BACKEND=postgres` and the timeout/retry knobs.

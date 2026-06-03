@@ -29,6 +29,10 @@ See `infra/aws/variables.tf`. Key ones: `aws_region`, `ecr_repo_name`,
 `lambda_timeout_seconds`, `schedule_expression`, `secret_arns`,
 `database_url_secret_arn`, `buff_cookie_secret_arn`.
 
+`database_url_secret_arn` and `buff_cookie_secret_arn` are automatically granted
+`secretsmanager:GetSecretValue`. Use `secret_arns` only for additional secrets
+that the function should read.
+
 Copy `terraform.tfvars.example` → `terraform.tfvars` and edit.
 
 ## Deploy
