@@ -9,6 +9,7 @@ Requires: DATABASE_URL env var pointing to the target database.
 Idempotent: each migration is tracked in schema_migrations and skipped
 if already applied.
 """
+
 from __future__ import annotations
 
 import os
@@ -28,7 +29,7 @@ def main() -> None:
         )
         sys.exit(1)
 
-    from src.db.postgres_client import apply_migration_file, applied_migrations
+    from src.db.postgres_client import applied_migrations, apply_migration_file
 
     already_applied = applied_migrations()
     migration_files = sorted(MIGRATIONS_DIR.glob("*.sql"))

@@ -15,6 +15,7 @@ Safety:
     - Does NOT delete any existing data in PostgreSQL.
     - Run after apply_postgres_migrations.py.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -34,7 +35,6 @@ def _check_database_url() -> None:
 
 
 def _load_from_sqlite(sqlite_path: str):
-    import pandas as pd
     from src.storage.sqlite import sqlite_load_history_frame
 
     path = Path(sqlite_path)
@@ -63,8 +63,9 @@ def _load_from_csv(csv_path: str):
 
 
 def _build_market_snapshots(df) -> list:
-    from market_models import MarketSnapshot
     import math
+
+    from market_models import MarketSnapshot
 
     snapshots_by_ts: dict[str, list] = {}
     skipped = 0
@@ -169,7 +170,9 @@ def main() -> None:
     )
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--sqlite", metavar="PATH", help="Path to local SQLite history file.")
-    source.add_argument("--csv", metavar="PATH", help="Path to CSV export (HISTORY_HEADERS columns).")
+    source.add_argument(
+        "--csv", metavar="PATH", help="Path to CSV export (HISTORY_HEADERS columns)."
+    )
     args = parser.parse_args()
 
     _check_database_url()

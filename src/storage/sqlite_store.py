@@ -6,6 +6,8 @@ from market_models import MarketSnapshot
 from src.storage.base import StorageBackendBase
 from src.storage.sqlite import (
     sqlite_load_history_frame as _load,
+)
+from src.storage.sqlite import (
     sqlite_write_snapshots as _write,
 )
 

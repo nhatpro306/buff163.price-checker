@@ -6,12 +6,6 @@ import pandas as pd
 import streamlit as st
 from gspread import WorksheetNotFound
 
-from src.dashboard.runtime import CACHE_TTL_SECONDS, HIGH_VALUE_MIN_PRICE, TRACK_KEYWORDS
-from src.dashboard.frames import (
-    filter_depthless_fallback_rows,
-    filter_fallback_overrides_same_day,
-)
-from src.dashboard.formatting import base_knife_type
 from main import (
     CATALOG_HEADERS,
     CATALOG_SHEET_NAME,
@@ -23,6 +17,12 @@ from main import (
     load_history_frame,
 )
 from market_utils import debug_log
+from src.dashboard.formatting import base_knife_type
+from src.dashboard.frames import (
+    filter_depthless_fallback_rows,
+    filter_fallback_overrides_same_day,
+)
+from src.dashboard.runtime import CACHE_TTL_SECONDS, HIGH_VALUE_MIN_PRICE, TRACK_KEYWORDS
 
 
 def fallback_history_frame() -> pd.DataFrame:

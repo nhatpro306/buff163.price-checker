@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pandas as pd
-import pytest
 
 from market_config import HISTORY_HEADERS
 from market_models import MarketSnapshot

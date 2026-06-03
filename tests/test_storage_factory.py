@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.storage.factory import StorageBackend, get_storage_backend
+from src.storage.factory import get_storage_backend
 from src.storage.sqlite_store import SqliteStore
 
 
@@ -25,6 +25,7 @@ def test_factory_sqlite_requires_path(monkeypatch):
 def test_factory_unknown_backend_falls_back_to_sheets(monkeypatch):
     monkeypatch.setenv("STORAGE_BACKEND", "notarealbackend")
     from src.storage.sheets_store import SheetsStore
+
     backend = get_storage_backend()
     assert isinstance(backend, SheetsStore)
 
@@ -36,6 +37,7 @@ def test_factory_postgres_requires_psycopg2(monkeypatch):
     # raises ImportError with a helpful message.
     try:
         from src.storage.postgres_store import PostgresStore
+
         backend = get_storage_backend()
         assert isinstance(backend, PostgresStore)
     except ImportError as exc:

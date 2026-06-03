@@ -1,19 +1,19 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any, Generator
-
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    import psycopg2.extensions
-    import psycopg2.extras
+    pass
 
 
 def _psycopg2():
     try:
         import psycopg2
         import psycopg2.extras
+
         return psycopg2
     except ImportError as exc:
         raise ImportError(

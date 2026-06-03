@@ -6,10 +6,10 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from src.dashboard.charts import chart_surface, daily_market_frame, price_history_chart
-from src.dashboard.kpis import dashboard_kpis, market_signal_cards, top_movers
-from src.dashboard.formatting import empty_state, format_market_table, section_title
 from main import FORECAST_SHEET_NAME
+from src.dashboard.charts import chart_surface, daily_market_frame, price_history_chart
+from src.dashboard.formatting import empty_state, format_market_table, section_title
+from src.dashboard.kpis import dashboard_kpis, market_signal_cards, top_movers
 
 
 def render_hero(
@@ -186,7 +186,9 @@ def render_forecast(
 
 
 def render_top_movers(history_df: pd.DataFrame, selected_knife_type: str) -> None:
-    section_title("Top Movers / Trending Skins", "Largest recent price moves in the selected market")
+    section_title(
+        "Top Movers / Trending Skins", "Largest recent price moves in the selected market"
+    )
     movers = top_movers(history_df[history_df["_Base Knife"] == selected_knife_type])
     if movers.empty:
         empty_state("No movers yet", "More historical points are needed to rank trending skins.")
