@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 
 _TS_FORMAT = "%Y-%m-%d %H:%M:%S"
 
@@ -48,6 +49,7 @@ class ScrapeRunSummary:
     succeeded: int = 0
     failed: int = 0
     skipped: int = 0
+    storage_backend: str | None = None
     errors: list[str] = field(default_factory=list)
 
     @classmethod
@@ -88,11 +90,28 @@ class ScrapeRunSummary:
             return 0.0
         return max(0.0, (finished - started).total_seconds())
 
+    def to_dict(self) -> dict[str, Any]:
+        """Structured summary for JSON logs / Lambda responses (no secrets)."""
+        return {
+            "status": self.status,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+            "duration_seconds": round(self.duration_seconds, 1),
+            "attempted": self.attempted,
+            "succeeded": self.succeeded,
+            "failed": self.failed,
+            "skipped": self.skipped,
+            "invalid": self.skipped,
+            "storage_backend": self.storage_backend,
+            "error_count": len(self.errors),
+        }
+
     def log_line(self) -> str:
+        backend = f" backend={self.storage_backend}" if self.storage_backend else ""
         return (
             f"Scraper run finished: status={self.status} "
             f"attempted={self.attempted} succeeded={self.succeeded} "
-            f"failed={self.failed} skipped={self.skipped} "
+            f"failed={self.failed} skipped={self.skipped}{backend} "
             f"duration_seconds={self.duration_seconds:.1f}"
         )
 
