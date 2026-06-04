@@ -14,9 +14,6 @@ from __future__ import annotations
 
 import os
 import sys
-from pathlib import Path
-
-MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "db" / "migrations"
 
 
 def main() -> None:
@@ -29,37 +26,20 @@ def main() -> None:
         )
         sys.exit(1)
 
-    from src.db.postgres_client import applied_migrations, apply_migration_file
+    from src.db.postgres_client import MIGRATIONS_DIR, apply_pending_migrations, migration_files
 
-    already_applied = applied_migrations()
-    migration_files = sorted(MIGRATIONS_DIR.glob("*.sql"))
+    files = migration_files()
 
-    if not migration_files:
+    if not files:
         print(f"No migration files found in {MIGRATIONS_DIR}.")
         return
 
-    applied_now: list[str] = []
-    skipped: list[str] = []
+    try:
+        applied_now = apply_pending_migrations()
+    except Exception as exc:
+        print(f"ERROR applying migrations: {exc.__class__.__name__}", file=sys.stderr)
+        sys.exit(1)
 
-    for sql_file in migration_files:
-        version = sql_file.stem
-        if version in already_applied:
-            skipped.append(version)
-            continue
-        print(f"Applying migration: {version} ...")
-        try:
-            apply_migration_file(str(sql_file))
-        except Exception as exc:
-            print(
-                f"ERROR applying {version}: {exc.__class__.__name__}",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        applied_now.append(version)
-        print(f"  OK: {version}")
-
-    if skipped:
-        print(f"Already applied (skipped): {', '.join(skipped)}")
     if applied_now:
         print(f"Applied {len(applied_now)} migration(s): {', '.join(applied_now)}")
     else:

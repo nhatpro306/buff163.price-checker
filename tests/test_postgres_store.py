@@ -30,6 +30,8 @@ def _mock_transaction(monkeypatch):
     from contextlib import contextmanager
 
     mock_cursor = MagicMock()
+    monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/test")
+    monkeypatch.setenv("BUFF_AUTO_MIGRATE_POSTGRES", "0")
 
     @contextmanager
     def fake_transaction():

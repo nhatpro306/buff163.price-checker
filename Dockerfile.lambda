@@ -14,6 +14,7 @@ RUN pip install --no-cache-dir -r ${LAMBDA_TASK_ROOT}/requirements-lambda.txt
 # dashboard out of the image.
 COPY handler.py main.py market_config.py market_models.py market_utils.py ${LAMBDA_TASK_ROOT}/
 COPY src ${LAMBDA_TASK_ROOT}/src
+COPY db ${LAMBDA_TASK_ROOT}/db
 
 # Lambda entrypoint: <module>.<function>
 CMD ["handler.lambda_handler"]

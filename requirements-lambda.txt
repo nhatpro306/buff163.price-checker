@@ -4,8 +4,9 @@
 # streamlit-autorefresh) to keep the image minimal.
 requests
 httpx
-pandas
-numpy
+pandas==2.2.3
+numpy==1.26.4
 gspread
 google-auth
 psycopg2-binary>=2.9,<3.0
+boto3

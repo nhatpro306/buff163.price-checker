@@ -62,7 +62,7 @@ def _load_from_csv(csv_path: str):
     return df
 
 
-def _build_market_snapshots(df) -> list:
+def _build_market_snapshots(df) -> dict[str, list]:
     import math
 
     from market_models import MarketSnapshot

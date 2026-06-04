@@ -17,8 +17,10 @@ from src.snapshot_merge import (
 )
 from src.storage import (
     SheetStore,
+    StorageBackendBase,
     append_history,
     csgotrader_snapshots,
+    get_storage_backend,
     get_track_keywords,
     load_history_frame,
     migrate_history_sheet,
@@ -33,10 +35,19 @@ from src.storage import (
 from src.validation import validate_snapshot
 
 
+def _configured_storage_backend() -> str:
+    return os.getenv("STORAGE_BACKEND", "sheets").strip().lower()
+
+
 def run(migrate_only: bool = False) -> ScrapeRunSummary | None:
     sqlite_path = os.getenv("BUFF_SQLITE_PATH", DEFAULT_SQLITE_PATH).strip()
+    configured_backend = _configured_storage_backend()
+    managed_backend: StorageBackendBase | None = None
+    use_managed_backend = configured_backend in {"postgres", "sqlite"} and not migrate_only
     enable_sqlite = env_flag("BUFF_WRITE_SQLITE", False)
-    write_sheets = env_flag("BUFF_WRITE_SHEETS", not enable_sqlite)
+    write_sheets = (
+        False if use_managed_backend else env_flag("BUFF_WRITE_SHEETS", not enable_sqlite)
+    )
     store = (
         SheetStore(SHEET_NAME)
         if write_sheets or migrate_only or env_flag("BUFF_RUN_MIGRATION", False)
@@ -52,11 +63,19 @@ def run(migrate_only: bool = False) -> ScrapeRunSummary | None:
     else:
         print("Skipping migration for this run (BUFF_RUN_MIGRATION is disabled).")
 
-    history = (
-        load_history_frame(store) if store is not None else sqlite_load_history_frame(sqlite_path)
-    )
+    if use_managed_backend:
+        managed_backend = get_storage_backend()
+        history = managed_backend.load_history_frame()
+    else:
+        history = (
+            load_history_frame(store)
+            if store is not None
+            else sqlite_load_history_frame(sqlite_path)
+        )
     debug_log(
-        f"pipeline history_loaded rows={len(history)} source={'sheets' if store is not None else 'sqlite'}"
+        "pipeline history_loaded "
+        f"rows={len(history)} "
+        f"source={configured_backend if use_managed_backend else ('sheets' if store is not None else 'sqlite')}"
     )
     if migrate_only:
         agent = PriceAnalysisAgent(history)
@@ -75,7 +94,7 @@ def run(migrate_only: bool = False) -> ScrapeRunSummary | None:
 
     client = BuffPriceClient()
     run_summary = ScrapeRunSummary.start()
-    run_summary.storage_backend = os.getenv("STORAGE_BACKEND", "sheets").strip().lower()
+    run_summary.storage_backend = configured_backend
     timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
     min_price = float(os.getenv("BUFF_MIN_PRICE_CNY", "0"))
     try:
@@ -191,6 +210,19 @@ def run(migrate_only: bool = False) -> ScrapeRunSummary | None:
 
     if enable_sqlite and sqlite_path and write_sheets:
         sqlite_write_snapshots(sqlite_path, snapshots, timestamp)
+
+    if managed_backend is not None:
+        managed_backend.write_snapshots(snapshots, timestamp)
+        print(
+            f"Collected {len(snapshots)} high-value snapshots for {', '.join(track_keywords)} "
+            f"(>= {min_price:.0f} CNY, pages={high_value_pages})."
+        )
+        run_summary.finalize()
+        record_run_summary = getattr(managed_backend, "record_run_summary", None)
+        if callable(record_run_summary):
+            record_run_summary(run_summary)
+        print(run_summary.log_line())
+        return run_summary
 
     if not write_sheets:
         if enable_sqlite and sqlite_path:

@@ -31,7 +31,10 @@ def run_health_check() -> dict[str, Any]:
     try:
         from src.storage.factory import get_storage_backend  # noqa: PLC0415
 
-        get_storage_backend()
+        backend_instance = get_storage_backend()
+        check_connection = getattr(backend_instance, "check_connection", None)
+        if callable(check_connection):
+            check_connection()
         checks["storage_init"] = "ok"
     except Exception as exc:  # noqa: BLE001 - report, do not crash
         checks["storage_init"] = "error"

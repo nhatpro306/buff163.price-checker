@@ -7,8 +7,10 @@ import pandas as pd
 
 def load_app_frames(
     *,
+    storage_backend: str,
     use_sqlite: bool,
     sqlite_path: str,
+    load_backend_history: Callable[[], pd.DataFrame],
     load_sqlite_history: Callable[[str], pd.DataFrame],
     load_sheet_history: Callable[[], pd.DataFrame],
     load_sheet_records: Callable[[str], pd.DataFrame],
@@ -17,6 +19,10 @@ def load_app_frames(
     forecast_sheet_name: str,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, Exception | None]:
     try:
+        if storage_backend in {"postgres", "sqlite"}:
+            history_df = load_backend_history()
+            return history_df, pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), None
+
         if use_sqlite and sqlite_path:
             # SQLite mode is for local testing without Google Sheets credentials.
             history_df = load_sqlite_history(sqlite_path)
