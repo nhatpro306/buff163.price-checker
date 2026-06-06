@@ -1,0 +1,249 @@
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+locals {
+  bucket_name = "${var.project}-${data.aws_caller_identity.current.account_id}-${data.aws_region.current.region}"
+}
+
+data "archive_file" "lambda_zip" {
+  type        = "zip"
+  source_file = "${path.module}/../../static_site_handler.py"
+  output_path = "${path.module}/build/static_site_handler.zip"
+}
+
+resource "aws_s3_bucket" "site" {
+  bucket = local.bucket_name
+}
+
+resource "aws_s3_bucket_public_access_block" "site" {
+  bucket                  = aws_s3_bucket.site.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_ownership_controls" "site" {
+  bucket = aws_s3_bucket.site.id
+
+  rule {
+    object_ownership = "BucketOwnerEnforced"
+  }
+}
+
+resource "aws_cloudfront_origin_access_control" "site" {
+  name                              = "${var.project}-oac"
+  description                       = "Private S3 access for BUFF163 free-tier static site"
+  origin_access_control_origin_type = "s3"
+  signing_behavior                  = "always"
+  signing_protocol                  = "sigv4"
+}
+
+resource "aws_cloudfront_distribution" "site" {
+  enabled             = true
+  default_root_object = "index.html"
+  price_class         = "PriceClass_100"
+  comment             = "${var.project} static dashboard"
+
+  origin {
+    domain_name              = aws_s3_bucket.site.bucket_regional_domain_name
+    origin_id                = "site"
+    origin_access_control_id = aws_cloudfront_origin_access_control.site.id
+  }
+
+  default_cache_behavior {
+    allowed_methods        = ["GET", "HEAD", "OPTIONS"]
+    cached_methods         = ["GET", "HEAD"]
+    target_origin_id       = "site"
+    viewer_protocol_policy = "redirect-to-https"
+    compress               = true
+    default_ttl            = 300
+    max_ttl                = 300
+    min_ttl                = 0
+
+    forwarded_values {
+      query_string = false
+
+      cookies {
+        forward = "none"
+      }
+    }
+  }
+
+  restrictions {
+    geo_restriction {
+      restriction_type = "none"
+    }
+  }
+
+  viewer_certificate {
+    cloudfront_default_certificate = true
+  }
+}
+
+data "aws_iam_policy_document" "site_bucket" {
+  statement {
+    sid     = "AllowCloudFrontRead"
+    actions = ["s3:GetObject"]
+
+    resources = ["${aws_s3_bucket.site.arn}/*"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["cloudfront.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "AWS:SourceArn"
+      values   = [aws_cloudfront_distribution.site.arn]
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "site" {
+  bucket = aws_s3_bucket.site.id
+  policy = data.aws_iam_policy_document.site_bucket.json
+}
+
+resource "aws_cloudwatch_log_group" "scraper" {
+  name              = "/aws/lambda/${var.project}-static-scraper"
+  retention_in_days = var.log_retention_days
+}
+
+data "aws_iam_policy_document" "lambda_assume" {
+  statement {
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["lambda.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "lambda" {
+  name               = "${var.project}-lambda-role"
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume.json
+}
+
+data "aws_iam_policy_document" "lambda" {
+  statement {
+    sid       = "WriteStaticSite"
+    actions   = ["s3:PutObject"]
+    resources = ["${aws_s3_bucket.site.arn}/*"]
+  }
+
+  statement {
+    sid = "Logs"
+    actions = [
+      "logs:CreateLogStream",
+      "logs:PutLogEvents",
+    ]
+    resources = ["${aws_cloudwatch_log_group.scraper.arn}:*"]
+  }
+}
+
+resource "aws_iam_role_policy" "lambda" {
+  name   = "${var.project}-lambda-policy"
+  role   = aws_iam_role.lambda.id
+  policy = data.aws_iam_policy_document.lambda.json
+}
+
+resource "aws_lambda_function" "scraper" {
+  function_name    = "${var.project}-static-scraper"
+  role             = aws_iam_role.lambda.arn
+  runtime          = "python3.11"
+  handler          = "static_site_handler.lambda_handler"
+  filename         = data.archive_file.lambda_zip.output_path
+  source_code_hash = data.archive_file.lambda_zip.output_base64sha256
+  memory_size      = var.lambda_memory_mb
+  timeout          = var.lambda_timeout_seconds
+
+  environment {
+    variables = {
+      STATIC_SITE_BUCKET  = aws_s3_bucket.site.bucket
+      BUFF_TRACK_KEYWORDS = var.track_keywords
+      BUFF_MIN_PRICE_CNY  = "0"
+    }
+  }
+
+  depends_on = [aws_cloudwatch_log_group.scraper]
+}
+
+resource "aws_scheduler_schedule" "scraper" {
+  name       = "${var.project}-daily-scrape"
+  group_name = "default"
+  state      = "ENABLED"
+
+  flexible_time_window {
+    mode = "OFF"
+  }
+
+  schedule_expression = var.schedule_expression
+
+  target {
+    arn      = aws_lambda_function.scraper.arn
+    role_arn = aws_iam_role.scheduler.arn
+
+    retry_policy {
+      maximum_retry_attempts = 1
+    }
+  }
+}
+
+data "aws_iam_policy_document" "scheduler_assume" {
+  statement {
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["scheduler.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "scheduler" {
+  name               = "${var.project}-scheduler-role"
+  assume_role_policy = data.aws_iam_policy_document.scheduler_assume.json
+}
+
+data "aws_iam_policy_document" "scheduler" {
+  statement {
+    sid       = "InvokeLambda"
+    actions   = ["lambda:InvokeFunction"]
+    resources = [aws_lambda_function.scraper.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "scheduler" {
+  name   = "${var.project}-scheduler-policy"
+  role   = aws_iam_role.scheduler.id
+  policy = data.aws_iam_policy_document.scheduler.json
+}
+
+resource "aws_budgets_budget" "monthly_cost_guardrail" {
+  count = var.budget_alert_email == "" ? 0 : 1
+
+  name         = "${var.project}-monthly-cost-guardrail"
+  budget_type  = "COST"
+  limit_amount = var.monthly_budget_usd
+  limit_unit   = "USD"
+  time_unit    = "MONTHLY"
+
+  notification {
+    comparison_operator        = "GREATER_THAN"
+    threshold                  = 50
+    threshold_type             = "PERCENTAGE"
+    notification_type          = "ACTUAL"
+    subscriber_email_addresses = [var.budget_alert_email]
+  }
+
+  notification {
+    comparison_operator        = "GREATER_THAN"
+    threshold                  = 80
+    threshold_type             = "PERCENTAGE"
+    notification_type          = "FORECASTED"
+    subscriber_email_addresses = [var.budget_alert_email]
+  }
+}
