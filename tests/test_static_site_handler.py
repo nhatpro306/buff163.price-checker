@@ -68,7 +68,7 @@ def test_static_site_handler_writes_html_and_json(monkeypatch):
     assert b"Selected item price view" in html_body
     assert b"selectedFamilyRows" in html_body
     assert b"selected-row" in html_body
-    assert b"Listing count unavailable in the current safe static feed" in html_body
+    assert b"Listing data unavailable" in html_body
     data_body = next(write["Body"] for write in writes if write["Key"] == "data.json")
     assert b"knife_type" in data_body
     assert b"item_name" in data_body
@@ -105,7 +105,7 @@ def test_static_site_handler_filters_bad_prices_and_validates_fallbacks(monkeypa
     assert rows[0]["wear"] == "MW"
     assert '<tbody id="rows"><tr' in html_body
     assert "selectedFamilyRows" in html_body
-    assert "Listing count unavailable in the current safe static feed" in html_body
+    assert "Listing data unavailable" in html_body
     static_site_handler._validate_static_payload(rows, html_body)
 
 

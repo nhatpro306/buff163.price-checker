@@ -180,6 +180,23 @@ def _spread(row: dict[str, Any]) -> str:
     return f"{percent:+.1f}%"
 
 
+def _listing_display(value: Any) -> tuple[str, str]:
+    """Return (text, liquidity class). null -> N/A / unknown; 0 -> 0 / zero."""
+    if value is None:
+        return "N/A", "unknown"
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        return "N/A", "unknown"
+    if count <= 0:
+        return "0", "zero"
+    if count >= 50:
+        return f"{count:,}", "high"
+    if count >= 10:
+        return f"{count:,}", "medium"
+    return f"{count:,}", "low"
+
+
 def _table_row_html(row: dict[str, Any]) -> str:
     image_url = html.escape(
         str(row.get("image_url") or _static_item_image_url(str(row.get("category") or "Knife")))
@@ -188,17 +205,19 @@ def _table_row_html(row: dict[str, Any]) -> str:
     category = html.escape(str(row.get("category") or row.get("knife_type") or "Unknown"))
     family = html.escape(str(row.get("family") or "Unknown"))
     wear = html.escape(str(row.get("wear") or row.get("condition") or "N/A"))
-    listings = int(_number_or_none(row.get("listing_count") or row.get("listings") or 0) or 0)
+    listings_text, liquidity = _listing_display(row.get("listing_count", row.get("listings")))
     source = html.escape(str(row.get("source") or ""))
     goods_id = html.escape(str(row.get("goods_id") or ""))
     return (
         f'<tr data-id="{goods_id}"><td><div class="skin-cell">'
-        f'<img class="skin-thumb" src="{image_url}" alt="">'
+        f'<img class="skin-thumb" src="{image_url}" alt="" loading="lazy">'
         f"<div><strong>{item_name}</strong><small>{category} / {family}</small></div>"
         f'</div></td><td><span class="pill">{wear}</span></td>'
         f'<td class="right">{_money(row.get("price") or row.get("price_cny"))}</td>'
         f'<td class="right">{_money(row.get("reference_price_cny"))}</td>'
-        f"<td>{_spread(row)}</td><td>{listings:,}</td><td>{source}</td></tr>"
+        f'<td>{_spread(row)}</td>'
+        f'<td><span class="liquidity liq-{liquidity}">{listings_text}</span></td>'
+        f"<td>{source}</td></tr>"
     )
 
 
@@ -258,19 +277,37 @@ def _snapshots() -> list[dict[str, Any]]:
         rows.append(
             {
                 "goods_id": _source_id(clean_name),
-                "item_name": clean_name,
+                "market_hash_name": clean_name,
+                "item_name": (
+                    f"{family} ({condition})" if condition != "Unknown" else family
+                ),
                 "knife_type": knife_type,
+                "weapon_type": "Knife",
                 "category": knife_type or "Unknown",
                 "family": family,
                 "skin_name": f"{family} ({condition})" if condition != "Unknown" else family,
                 "condition": condition or "Unknown",
+                "condition_short": wear,
                 "wear": wear,
                 "price": price_cny,
                 "price_cny": price_cny,
                 "reference_price_cny": reference_price_cny,
-                "listings": 0,
-                "listing_count": 0,
-                "buy_orders": 0,
+                "spread_percent": (
+                    round(((price_cny - reference_price_cny) / price_cny) * 100, 2)
+                    if price_cny and reference_price_cny
+                    else None
+                ),
+                # csgotrader public feed does not include order-book depth.
+                # Use null (unknown), NOT 0 (which would mean confirmed zero listings).
+                "listings": None,
+                "listing_count": None,
+                "sell_min_price": price_cny,
+                "buy_max_price": (
+                    float(highest_order_price * usd_to_cny)
+                    if highest_order_price is not None
+                    else None
+                ),
+                "buff_url": None,  # goods_id is a content hash, not a Buff numeric id
                 "image_url": image_url or image_fallback_url,
                 "has_source_image": bool(image_url),
                 "source": "csgotrader buff163",
@@ -285,6 +322,97 @@ def _snapshots() -> list[dict[str, Any]]:
             row["goods_id"],
         ),
     )
+
+
+def _data_quality(rows: list[dict[str, Any]], iso_now: str) -> dict[str, Any]:
+    """Coverage report. Listing_count = null counts as unknown, not zero."""
+    total = len(rows)
+    with_price = sum(1 for r in rows if isinstance(r.get("price_cny"), (int, float)) and r["price_cny"] > 0)
+    with_ref = sum(1 for r in rows if isinstance(r.get("reference_price_cny"), (int, float)))
+    with_listing = sum(1 for r in rows if r.get("listing_count") is not None)
+    unknown_listing = total - with_listing
+    with_image = sum(1 for r in rows if r.get("image_url"))
+    with_goods_id = sum(1 for r in rows if r.get("goods_id"))
+    families = {str(r.get("family") or "Unknown") for r in rows}
+    return {
+        "generated_at": iso_now,
+        "total_items": total,
+        "items_with_price": with_price,
+        "items_with_reference_price": with_ref,
+        "items_with_listing_count": with_listing,
+        "items_with_unknown_listing_count": unknown_listing,
+        "items_with_image": with_image,
+        "items_with_goods_id": with_goods_id,
+        "families_count": len(families),
+        "source": "csgotrader buff163",
+        "warnings": (
+            ["listing_count unavailable from upstream feed; values shown as N/A"]
+            if unknown_listing == total and total > 0
+            else []
+        ),
+    }
+
+
+def _market_summary(rows: list[dict[str, Any]], iso_now: str) -> dict[str, Any]:
+    """Global summary for the dashboard hero / KPI cards."""
+    prices = [r["price_cny"] for r in rows if isinstance(r.get("price_cny"), (int, float)) and r["price_cny"] > 0]
+    families = {str(r.get("family") or "Unknown") for r in rows}
+    highest = max(rows, key=lambda r: (r.get("price_cny") or 0), default=None)
+    lowest = min(
+        (r for r in rows if isinstance(r.get("price_cny"), (int, float)) and r["price_cny"] > 0),
+        key=lambda r: r["price_cny"],
+        default=None,
+    )
+    # Most listed only meaningful when listing_count is known.
+    listed = [r for r in rows if isinstance(r.get("listing_count"), (int, float))]
+    most_listed = max(listed, key=lambda r: r["listing_count"], default=None) if listed else None
+    return {
+        "generated_at": iso_now,
+        "total_items": len(rows),
+        "total_families": len(families),
+        "average_price_cny": round(sum(prices) / len(prices), 2) if prices else None,
+        "highest_price_item": _summary_item(highest),
+        "lowest_price_item": _summary_item(lowest),
+        "most_listed_item": _summary_item(most_listed),
+    }
+
+
+def _summary_item(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not row:
+        return None
+    return {
+        "goods_id": row.get("goods_id"),
+        "item_name": row.get("item_name"),
+        "family": row.get("family"),
+        "condition": row.get("condition"),
+        "price_cny": row.get("price_cny"),
+        "listing_count": row.get("listing_count"),
+    }
+
+
+def _families_summary(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Per-family aggregation for the family cards section."""
+    by_family: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        family = str(row.get("knife_type") or "Unknown")
+        by_family.setdefault(family, []).append(row)
+    summary: list[dict[str, Any]] = []
+    for family, items in by_family.items():
+        prices = [r["price_cny"] for r in items if isinstance(r.get("price_cny"), (int, float)) and r["price_cny"] > 0]
+        listed = [r for r in items if isinstance(r.get("listing_count"), (int, float))]
+        first_image = next((r.get("image_url") for r in items if r.get("image_url")), "")
+        summary.append(
+            {
+                "family": family,
+                "item_count": len(items),
+                "average_price_cny": round(sum(prices) / len(prices), 2) if prices else None,
+                "min_price_cny": min(prices) if prices else None,
+                "max_price_cny": max(prices) if prices else None,
+                "total_listings": sum(r["listing_count"] for r in listed) if listed else None,
+                "image_url": first_image or _static_item_image_url(family),
+            }
+        )
+    return sorted(summary, key=lambda f: (-f["item_count"], f["family"]))
 
 
 def _render_html(updated_at: str, rows: list[dict[str, Any]]) -> str:
@@ -681,6 +809,48 @@ def _render_html(updated_at: str, rows: list[dict[str, Any]]) -> str:
       border-radius: 999px; padding: 5px 9px; background: rgba(245,179,66,.12);
       color: #ffd58a; border: 1px solid rgba(245,179,66,.2); white-space: nowrap;
     }
+    .liquidity {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 9px; border-radius: 999px;
+      font-variant-numeric: tabular-nums;
+      font-size: 12.5px; font-weight: 600; letter-spacing: .01em;
+      border: 1px solid transparent; white-space: nowrap;
+    }
+    .liquidity::before {
+      content: ""; width: 6px; height: 6px; border-radius: 999px;
+    }
+    .liq-high    { background: rgba(86,216,154,.14); color: #b9f8d7; border-color: rgba(86,216,154,.34); }
+    .liq-high::before    { background: var(--green); box-shadow: 0 0 8px var(--green); }
+    .liq-medium  { background: rgba(245,179,66,.14); color: #ffd58a; border-color: rgba(245,179,66,.32); }
+    .liq-medium::before  { background: var(--gold); }
+    .liq-low     { background: rgba(255,107,107,.10); color: #ffc1c1; border-color: rgba(255,107,107,.28); }
+    .liq-low::before     { background: var(--red); }
+    .liq-zero    { background: rgba(255,255,255,.05); color: var(--muted); border-color: rgba(255,255,255,.10); }
+    .liq-zero::before    { background: var(--muted); }
+    .liq-unknown { background: rgba(121,169,255,.10); color: #c8dcff; border-color: rgba(121,169,255,.28); }
+    .liq-unknown::before { background: var(--blue); }
+    .source-health {
+      margin-top: 24px; padding: 22px; display: grid;
+      grid-template-columns: 1fr; gap: 18px;
+    }
+    .source-health h2 { margin: 0; font-size: 18px; }
+    .health-grid {
+      display: grid; gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    }
+    .health-item {
+      padding: 12px 14px; border-radius: 10px;
+      background: rgba(7, 10, 16, .48);
+      border: 1px solid var(--line);
+    }
+    .health-item span { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+    .health-item strong { display: block; margin-top: 4px; font-size: 18px; font-variant-numeric: tabular-nums; }
+    .health-warning {
+      padding: 12px 14px; border-radius: 10px;
+      background: rgba(245,179,66,.10);
+      border: 1px solid rgba(245,179,66,.32);
+      color: #ffd58a; font-size: 13px; line-height: 1.55;
+    }
     .table-actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 16px; color: var(--muted); font-size: 12px; }
     .load-more {
       min-height: 38px;
@@ -843,6 +1013,12 @@ def _render_html(updated_at: str, rows: list[dict[str, Any]]) -> str:
     </aside>
   </section>
 
+  <section class="panel source-health" id="sourceHealth">
+    <div class="panel-title"><div><span class="panel-kicker">Data quality</span><h2>Dataset coverage</h2></div><span class="badge" id="healthBadge">Loading</span></div>
+    <div class="health-grid" id="healthGrid"></div>
+    <div class="health-warning" id="healthWarning" hidden></div>
+  </section>
+
   <section class="panel" style="margin-top:16px">
     <div class="panel-title"><div><span class="panel-kicker">Tracked skins</span><h2>Market table</h2></div><span class="badge" id="tableCount">0 rows</span></div>
     <div class="table-tools">
@@ -921,9 +1097,28 @@ function rowPrice(row) {
   const price = Number(row.price ?? row.price_cny ?? 0);
   return Number.isFinite(price) ? price : 0;
 }
+function listingValue(row) {
+  // Returns the raw listing count number, or null when unknown.
+  const raw = row.listing_count !== undefined ? row.listing_count : row.listings;
+  if (raw === null || raw === undefined) return null;
+  const count = Number(raw);
+  return Number.isFinite(count) ? count : null;
+}
 function listingCount(row) {
-  const count = Number(row.listing_count ?? row.listings ?? 0);
-  return Number.isFinite(count) ? count : 0;
+  // Numeric form for charts/sorting. Unknown -> 0 so it stops sorting on top.
+  const v = listingValue(row);
+  return v === null ? 0 : v;
+}
+function listingDisplay(row) {
+  const v = listingValue(row);
+  if (v === null) return { text: "N/A", cls: "unknown", numeric: 0 };
+  if (v <= 0) return { text: "0", cls: "zero", numeric: 0 };
+  if (v >= 50) return { text: v.toLocaleString(), cls: "high", numeric: v };
+  if (v >= 10) return { text: v.toLocaleString(), cls: "medium", numeric: v };
+  return { text: v.toLocaleString(), cls: "low", numeric: v };
+}
+function liquidityLabel(cls) {
+  return ({ high: "High liquidity", medium: "Medium", low: "Low supply", zero: "No listings", unknown: "Unknown" })[cls] || cls;
 }
 function selectedFamilyRows() {
   if (!selectedRow) return rows;
@@ -977,7 +1172,10 @@ function renderDetail() {
   detailType.textContent = selectedRow.knife_type || "N/A";
   detailLatestPrice.textContent = money(selectedRow.price ?? selectedRow.price_cny);
   detailReferencePrice.textContent = money(selectedRow.reference_price_cny);
-  detailListings.textContent = listingCount(selectedRow).toLocaleString();
+  const sld = listingDisplay(selectedRow);
+  detailListings.textContent = sld.text;
+  detailListings.className = "liquidity liq-" + sld.cls;
+  detailListings.title = liquidityLabel(sld.cls);
   const sameFamily = rows.filter(row => row.family === selectedRow.family);
   wearButtons.innerHTML = wearOrder.map(wear => {
     const match = sameFamily.find(row => row.wear === wear);
@@ -1015,7 +1213,8 @@ function renderTable() {
   loadMore.hidden = visible.length >= filtered.length;
   tbody.innerHTML = visible.map(row => {
     const isSelected = selectedRow && row.goods_id === selectedRow.goods_id;
-    return `<tr data-id="${escapeHtml(row.goods_id)}" class="${isSelected ? "selected-row" : ""}"><td><div class="skin-cell"><img class="skin-thumb" src="${escapeHtml(imageForRow(row))}" alt=""><div><strong>${escapeHtml(row.item_name || row.skin_name)}</strong><small>${escapeHtml(row.category || row.knife_type || "Unknown")} / ${escapeHtml(row.family || "Unknown")}</small></div></div></td><td><span class="pill">${escapeHtml(row.wear || row.condition || "N/A")}</span></td><td class="right">${money(row.price ?? row.price_cny)}</td><td class="right">${money(row.reference_price_cny)}</td><td>${spread(row)}</td><td>${listingCount(row).toLocaleString()}</td><td>${escapeHtml(row.source)}</td></tr>`;
+    const ld = listingDisplay(row);
+    return `<tr data-id="${escapeHtml(row.goods_id)}" class="${isSelected ? "selected-row" : ""}"><td><div class="skin-cell"><img class="skin-thumb" src="${escapeHtml(imageForRow(row))}" alt="" loading="lazy"><div><strong>${escapeHtml(row.item_name || row.skin_name)}</strong><small>${escapeHtml(row.category || row.knife_type || "Unknown")} / ${escapeHtml(row.family || "Unknown")}</small></div></div></td><td><span class="pill">${escapeHtml(row.wear || row.condition || "N/A")}</span></td><td class="right">${money(row.price ?? row.price_cny)}</td><td class="right">${money(row.reference_price_cny)}</td><td>${spread(row)}</td><td><span class="liquidity liq-${ld.cls}" title="${escapeHtml(liquidityLabel(ld.cls))}">${ld.text}</span></td><td>${escapeHtml(row.source)}</td></tr>`;
   }).join("");
   tbody.querySelectorAll("tr").forEach(rowEl => {
     rowEl.addEventListener("click", () => {
@@ -1051,11 +1250,11 @@ function renderPriceChart() {
 function renderListingChart() {
   const host = document.getElementById("listingChart");
   const pool = selectedFamilyRows();
-  const liquid = pool.filter(row => listingCount(row) > 0).slice(0, 40);
+  const liquid = pool.filter(row => listingValue(row) && listingValue(row) > 0).slice(0, 40);
   if (!liquid.length) {
-    const label = selectedRow ? (selectedRow.item_name || selectedRow.skin_name || "Selected item") : "Selected item";
-    const count = selectedRow ? listingCount(selectedRow).toLocaleString() : "0";
-    host.innerHTML = `<div class="empty-state"><div><strong>${escapeHtml(label)}</strong><p>Listing count unavailable in the current safe static feed. The free-tier source publishes price references but not live order-book depth.</p><p class="muted">Current listing count field: ${count}</p></div></div>`;
+    const unknownCount = pool.filter(row => listingValue(row) === null).length;
+    const zeroCount = pool.filter(row => listingValue(row) === 0).length;
+    host.innerHTML = `<div class="empty-state"><div><strong>Listing data unavailable</strong><p>The csgotrader free-tier feed publishes price references but not live order-book depth. ${unknownCount.toLocaleString()} items in this family show <code>N/A</code> for listings; ${zeroCount.toLocaleString()} confirmed zero. Real listing counts require BUFF163 API access with cookies.</p></div></div>`;
     return;
   }
   const w = 900, h = 280, pad = 30;
@@ -1096,7 +1295,47 @@ function renderInsights() {
     `<div class="insight"><strong>Execution note</strong><span class="muted">Use the table filters for quick watchlist discovery. Current dataset is a daily static snapshot.</span></div>`
   ].join("");
 }
-function render() { renderKnifeRail(); renderKnifeAtlas(); renderDetail(); renderTable(); renderPriceChart(); renderListingChart(); renderRelatedItems(); renderInsights(); }
+function renderSourceHealth() {
+  const host = document.getElementById("healthGrid");
+  const warn = document.getElementById("healthWarning");
+  const badge = document.getElementById("healthBadge");
+  if (!host) return;
+  const total = rows.length;
+  const withPrice = rows.filter(r => rowPrice(r) > 0).length;
+  const withRef = rows.filter(r => Number.isFinite(Number(r.reference_price_cny))).length;
+  const withListing = rows.filter(r => listingValue(r) !== null).length;
+  const unknownListing = total - withListing;
+  const withImage = rows.filter(r => r.image_url).length;
+  const withGoodsId = rows.filter(r => r.goods_id).length;
+  const familiesCount = new Set(rows.map(r => r.family).filter(Boolean)).size;
+  const listingCoverage = total ? withListing / total : 0;
+  const status = unknownListing === 0 ? "Healthy" : (listingCoverage >= 0.5 ? "Partial" : "Warning");
+  badge.textContent = status;
+  badge.className = "badge " + (status === "Healthy" ? "live" : "");
+  const items = [
+    ["Total items", total.toLocaleString()],
+    ["Items with price", withPrice.toLocaleString()],
+    ["With reference price", withRef.toLocaleString()],
+    ["With listing data", withListing.toLocaleString()],
+    ["Unknown listing", unknownListing.toLocaleString()],
+    ["With image", withImage.toLocaleString()],
+    ["With goods_id", withGoodsId.toLocaleString()],
+    ["Knife families", familiesCount.toLocaleString()],
+  ];
+  host.innerHTML = items.map(([k, v]) =>
+    `<div class="health-item"><span>${escapeHtml(k)}</span><strong>${v}</strong></div>`
+  ).join("");
+  if (listingCoverage < 0.05) {
+    warn.hidden = false;
+    warn.innerHTML = `<strong>Listing data unavailable.</strong> The current free-tier feed (csgotrader public BUFF163 JSON) publishes price references but not live order-book depth. Listings show <code>N/A</code>, not <code>0</code>. To populate real listing counts, the scraper would need to call the BUFF163 goods API with a valid cookie (out of scope for the cost-safe public path).`;
+  } else if (listingCoverage < 0.5) {
+    warn.hidden = false;
+    warn.innerHTML = `<strong>Listing data coverage is low.</strong> ${unknownListing.toLocaleString()} items show <code>N/A</code> for listings. <code>0</code> only appears for items the scraper confirmed have no active listings.`;
+  } else {
+    warn.hidden = true;
+  }
+}
+function render() { renderKnifeRail(); renderKnifeAtlas(); renderDetail(); renderTable(); renderPriceChart(); renderListingChart(); renderRelatedItems(); renderInsights(); renderSourceHealth(); }
 search.addEventListener("input", () => { tableLimit = 300; render(); });
 knifeType.addEventListener("change", () => { tableLimit = 300; render(); });
 condition.addEventListener("change", () => { tableLimit = 300; render(); });
@@ -1224,6 +1463,11 @@ def lambda_handler(event: dict[str, Any] | None = None, context: Any = None) -> 
                 {"last_run_at": iso_now, "items": len(rows), "version": 1},
                 dedupe=False,
             )
+            # Coverage report, global summary, per-family aggregation.
+            put_json(s3, bucket, f"{key_prefix}data/data-quality.json", _data_quality(rows, iso_now))
+            put_json(s3, bucket, f"{key_prefix}data/market-summary.json", _market_summary(rows, iso_now))
+            put_json(s3, bucket, f"{key_prefix}data/market-items.json", rows)
+            put_json(s3, bucket, f"{key_prefix}data/families.json", _families_summary(rows))
             # Append-only history backup only when content actually changed.
             if data_result.get("written"):
                 now_dt = datetime.now(UTC)
