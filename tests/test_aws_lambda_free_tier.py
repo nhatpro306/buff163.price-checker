@@ -146,3 +146,49 @@ def test_send_discord_alert_success_returns_true():
     resp.__exit__ = lambda *a: None
     with patch("urllib.request.urlopen", return_value=resp):
         assert send_discord_alert("https://example.invalid/hook", "partial_success", summary) is True
+
+
+# --- buff listing enrichment ------------------------------------------------
+
+def test_buff_fetch_listing_map_no_cookie_is_noop():
+    from src.aws_lambda.buff_listings import fetch_listing_map
+
+    out, errors = fetch_listing_map("")
+    assert out == {}
+    assert "buff_cookie_absent" in errors
+
+
+def test_buff_enrich_rows_matches_by_normalized_name():
+    from src.aws_lambda.buff_listings import enrich_rows
+
+    rows = [
+        {"market_hash_name": "★ Butterfly Knife | Tiger Tooth (Factory New)", "listing_count": None},
+        {"market_hash_name": "M9 Bayonet | Doppler (Factory New)", "listing_count": None},
+    ]
+    listing_map = {
+        "butterfly knife | tiger tooth (factory new)": {"goods_id": 42587, "listing_count": 251, "sell_min_price": "7640"},
+    }
+    enriched = enrich_rows(rows, listing_map)
+    assert enriched == 1
+    assert rows[0]["listing_count"] == 251
+    assert rows[0]["buff_url"] == "https://buff.163.com/goods/42587"
+    assert rows[1]["listing_count"] is None  # no match -> stays unknown
+
+
+def test_buff_fetch_listing_map_parses_payload():
+    from src.aws_lambda import buff_listings
+
+    payload = {
+        "code": "OK",
+        "data": {"items": [
+            {"id": 42587, "market_hash_name": "★ Butterfly Knife | Tiger Tooth (Factory New)", "sell_num": 251, "sell_min_price": "7640"},
+            {"id": 776, "market_hash_name": "★ Karambit | Doppler (Factory New)", "sell_num": 88},
+        ]},
+    }
+    with patch.object(buff_listings, "_get_json", return_value=payload), \
+         patch.object(buff_listings.time, "sleep", lambda *_a: None):
+        out, errors = buff_listings.fetch_listing_map("session=x", pages=1)
+    assert errors == []
+    assert out["butterfly knife | tiger tooth (factory new)"]["goods_id"] == 42587
+    assert out["butterfly knife | tiger tooth (factory new)"]["listing_count"] == 251
+    assert out["karambit | doppler (factory new)"]["listing_count"] == 88

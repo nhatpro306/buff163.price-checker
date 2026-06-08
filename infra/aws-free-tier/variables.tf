@@ -117,3 +117,15 @@ variable "discord_webhook_ssm_param" {
   type        = string
   default     = ""
 }
+
+variable "buff_cookie_ssm_param" {
+  description = "SSM Parameter Store path holding a BUFF163 session cookie (SecureString). When set and populated, the Lambda enriches the most-listed knives with real Sell(N) listing counts. Leave default and simply do not create the parameter to stay price-only."
+  type        = string
+  default     = "/buff163/cookie"
+}
+
+variable "listing_pages" {
+  description = "BUFF goods-list pages (50/page, sorted by sell_num desc) to fetch for listing enrichment. 4 pages ~= top 200 most-listed knives."
+  type        = number
+  default     = 4
+}

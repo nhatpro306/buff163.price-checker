@@ -214,6 +214,8 @@ def _table_row_html(row: dict[str, Any]) -> str:
     wear = html.escape(str(row.get("wear") or row.get("condition") or "N/A"))
     source = html.escape(str(row.get("source") or ""))
     goods_id = html.escape(str(row.get("goods_id") or ""))
+    lc = row.get("listing_count")
+    listing = f"{int(lc):,}" if isinstance(lc, (int, float)) else "N/A"
     return (
         f'<tr data-id="{goods_id}"><td><div class="skin-cell">'
         f'<img class="skin-thumb" src="{image_url}" alt="" loading="lazy" '
@@ -223,6 +225,7 @@ def _table_row_html(row: dict[str, Any]) -> str:
         f'<td class="right">{_money(row.get("price") or row.get("price_cny"))}</td>'
         f'<td class="right">{_money(row.get("reference_price_cny"))}</td>'
         f'<td>{_spread(row)}</td>'
+        f'<td class="right">{listing}</td>'
         f"<td>{source}</td></tr>"
     )
 
@@ -1056,6 +1059,7 @@ def _render_html(updated_at: str, rows: list[dict[str, Any]]) -> str:
         <div class="price-tile"><span>Latest price</span><strong id="detailLatestPrice">__INITIAL_DETAIL_PRICE__</strong></div>
         <div class="price-tile"><span>Reference price</span><strong id="detailReferencePrice">__INITIAL_DETAIL_REF__</strong></div>
         <div class="price-tile"><span>Spread</span><strong id="detailSpread">__INITIAL_DETAIL_SPREAD__</strong></div>
+        <div class="price-tile"><span>Listings (Sell)</span><strong id="detailListings">N/A</strong></div>
       </div>
       <div class="detail-actions">
         <a id="detailBuffLink" class="buff-link" href="__INITIAL_BUFF_SEARCH__" target="_blank" rel="noopener noreferrer">Search on BUFF163 &rarr;</a>
@@ -1120,6 +1124,7 @@ def _render_html(updated_at: str, rows: list[dict[str, Any]]) -> str:
       <select id="sort">
         <option value="price-desc">Price high to low</option>
         <option value="price-asc">Price low to high</option>
+        <option value="listings-desc">Listings high to low</option>
         <option value="spread-desc">Spread high to low</option>
         <option value="spread-asc">Spread low to high</option>
         <option value="name">Name A-Z</option>
@@ -1129,7 +1134,7 @@ def _render_html(updated_at: str, rows: list[dict[str, Any]]) -> str:
     </div>
     <div class="table-shell">
       <table>
-        <thead><tr><th>Item</th><th>Wear</th><th class="right">Price</th><th class="right">Reference</th><th>Spread</th><th>Source</th></tr></thead>
+        <thead><tr><th>Item</th><th>Wear</th><th class="right">Price</th><th class="right">Reference</th><th>Spread</th><th class="right">Listings</th><th>Source</th></tr></thead>
         <tbody id="rows">__INITIAL_TABLE_ROWS__</tbody>
       </table>
     </div>
@@ -1159,6 +1164,7 @@ const detailType = document.getElementById("detailType");
 const detailLatestPrice = document.getElementById("detailLatestPrice");
 const detailReferencePrice = document.getElementById("detailReferencePrice");
 const detailSpread = document.getElementById("detailSpread");
+const detailListings = document.getElementById("detailListings");
 const wearButtons = document.getElementById("wearButtons");
 // Inline gradient SVG used whenever a Steam CDN image 404s or is missing.
 const FALLBACK_IMG = "data:image/svg+xml;utf8," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 120"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="#f5b342"/><stop offset=".55" stop-color="#ff7a1a"/><stop offset="1" stop-color="#111827"/></linearGradient></defs><rect width="160" height="120" rx="14" fill="#0b101a"/><path d="M119 21 139 41 70 110 45 115 50 90Z" fill="url(#g)"/><path d="M47 82 78 113" stroke="#f8d08a" stroke-width="7" stroke-linecap="round"/></svg>');
@@ -1212,6 +1218,17 @@ function spreadText(row) {
   if (v === null) return spread(row);
   return `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
 }
+function listingValue(row) {
+  const raw = row.listing_count;
+  if (raw === null || raw === undefined) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+function listingText(row) {
+  const v = listingValue(row);
+  return v === null ? "N/A" : v.toLocaleString();
+}
+const anyListings = rows.some(r => listingValue(r) !== null);
 function selectedFamilyRows() {
   if (!selectedRow) return rows;
   const familyRows = rows.filter(row => row.family === selectedRow.family);
@@ -1251,7 +1268,7 @@ function renderFamilyBrowser() {
     const sel = selectedRow && r.goods_id === selectedRow.goods_id;
     return `<button class="skin-pick ${sel ? "selected-row" : ""}" type="button" data-id="${escapeHtml(r.goods_id)}">
       <img src="${escapeHtml(imageForRow(r) || FALLBACK_IMG)}" alt="" loading="lazy" onerror="imgFallback(this)">
-      <div class="sp-body"><strong>${escapeHtml(r.skin_name || r.item_name)}</strong><span>${escapeHtml(r.wear || r.condition)} &middot; ${money(r.price ?? r.price_cny)} &middot; ${spreadText(r)}</span></div>
+      <div class="sp-body"><strong>${escapeHtml(r.skin_name || r.item_name)}</strong><span>${escapeHtml(r.wear || r.condition)} &middot; ${money(r.price ?? r.price_cny)}${listingValue(r) !== null ? " &middot; Sell " + listingText(r) : ""}</span></div>
     </button>`;
   }).join("");
   skinGrid.querySelectorAll("button").forEach(btn => {
@@ -1303,6 +1320,7 @@ function renderDetail() {
   detailLatestPrice.textContent = money(selectedRow.price ?? selectedRow.price_cny);
   detailReferencePrice.textContent = money(selectedRow.reference_price_cny);
   detailSpread.textContent = spreadText(selectedRow);
+  if (detailListings) detailListings.textContent = listingText(selectedRow);
   if (detailBuffLink) {
     const q = encodeURIComponent(selectedRow.market_hash_name || selectedRow.item_name || "");
     detailBuffLink.href = selectedRow.buff_url || `https://buff.163.com/market/csgo#tab=selling&page_num=1&search=${q}`;
@@ -1336,6 +1354,7 @@ function filteredRows() {
   filtered.sort((a,b) => {
     const s = sort.value;
     if (s === "price-asc")    return rowPrice(a) - rowPrice(b);
+    if (s === "listings-desc")return (listingValue(b) ?? -1) - (listingValue(a) ?? -1);
     if (s === "spread-desc")  return (Number(b.spread_percent)||-Infinity) - (Number(a.spread_percent)||-Infinity);
     if (s === "spread-asc")   return Math.abs(Number(a.spread_percent)||Infinity) - Math.abs(Number(b.spread_percent)||Infinity);
     if (s === "name")         return String(a.skin_name||"").localeCompare(String(b.skin_name||""));
@@ -1352,7 +1371,7 @@ function renderTable() {
   loadMore.hidden = visible.length >= filtered.length;
   tbody.innerHTML = visible.map(row => {
     const isSelected = selectedRow && row.goods_id === selectedRow.goods_id;
-    return `<tr data-id="${escapeHtml(row.goods_id)}" class="${isSelected ? "selected-row" : ""}"><td><div class="skin-cell"><img class="skin-thumb" src="${escapeHtml(imageForRow(row) || FALLBACK_IMG)}" alt="" loading="lazy" onerror="imgFallback(this)"><div><strong>${escapeHtml(row.item_name || row.skin_name)}</strong><small>${escapeHtml(row.knife_type || "Unknown")} &middot; ${escapeHtml(row.condition || "N/A")}</small></div></div></td><td><span class="pill">${escapeHtml(row.wear || row.condition || "N/A")}</span></td><td class="right">${money(row.price ?? row.price_cny)}</td><td class="right">${money(row.reference_price_cny)}</td><td>${spreadText(row)}</td><td>${escapeHtml(row.source)}</td></tr>`;
+    return `<tr data-id="${escapeHtml(row.goods_id)}" class="${isSelected ? "selected-row" : ""}"><td><div class="skin-cell"><img class="skin-thumb" src="${escapeHtml(imageForRow(row) || FALLBACK_IMG)}" alt="" loading="lazy" onerror="imgFallback(this)"><div><strong>${escapeHtml(row.item_name || row.skin_name)}</strong><small>${escapeHtml(row.knife_type || "Unknown")} &middot; ${escapeHtml(row.condition || "N/A")}</small></div></div></td><td><span class="pill">${escapeHtml(row.wear || row.condition || "N/A")}</span></td><td class="right">${money(row.price ?? row.price_cny)}</td><td class="right">${money(row.reference_price_cny)}</td><td>${spreadText(row)}</td><td class="right">${listingText(row)}</td><td>${escapeHtml(row.source)}</td></tr>`;
   }).join("");
   tbody.querySelectorAll("tr").forEach(rowEl => {
     rowEl.addEventListener("click", () => {
@@ -1612,6 +1631,40 @@ render();
     return template
 
 
+def _enrich_listings(ssm_client: Any, rows: list[dict[str, Any]], errors: list[str]) -> None:
+    """Add real BUFF listing counts (Sell(N)) to the top-priced knives.
+
+    Reads a BUFF session cookie from SSM (param name in BUFF_COOKIE_SSM_PARAM,
+    default ``/buff163/cookie``). No cookie -> silently skipped. Only the top
+    ``LISTING_TOP_N`` rows by price are considered, and the BUFF goods list is
+    paged by sell_num desc, so a handful of requests cover the busiest knives.
+    """
+    import os  # noqa: PLC0415
+
+    param = os.getenv("BUFF_COOKIE_SSM_PARAM", "/buff163/cookie").strip()
+    if not param:
+        return
+    try:
+        out = ssm_client.get_parameter(Name=param, WithDecryption=True)
+        cookie = str((out.get("Parameter") or {}).get("Value") or "")
+    except Exception:  # noqa: BLE001 - no cookie configured -> price-only
+        return
+    if not cookie:
+        return
+
+    try:
+        from src.aws_lambda.buff_listings import enrich_rows, fetch_listing_map  # noqa: PLC0415
+
+        pages = int(os.getenv("LISTING_PAGES", "4"))
+        listing_map, fetch_errors = fetch_listing_map(cookie, pages=pages)
+        errors.extend(fetch_errors)
+        if listing_map:
+            count = enrich_rows(rows, listing_map)
+            print(f"listings_enriched={count} listing_map_size={len(listing_map)}", flush=True)
+    except Exception as exc:  # noqa: BLE001 - enrichment is best-effort
+        errors.append(f"listing_enrich_failed: {type(exc).__name__}")
+
+
 def lambda_handler(event: dict[str, Any] | None = None, context: Any = None) -> dict[str, Any]:
     """Free-tier Lambda entry.
 
@@ -1655,13 +1708,6 @@ def lambda_handler(event: dict[str, Any] | None = None, context: Any = None) -> 
     items_saved = 0
     html_body = ""
 
-    try:
-        rows = _snapshots()
-        html_body = _render_html(updated_at, rows)
-        _validate_static_payload(rows, html_body)
-    except Exception as exc:  # noqa: BLE001 - boundary
-        errors.append(f"scrape_failed: {type(exc).__name__}")
-
     import boto3  # noqa: PLC0415
 
     s3 = boto3.client("s3")
@@ -1669,6 +1715,16 @@ def lambda_handler(event: dict[str, Any] | None = None, context: Any = None) -> 
 
     # Lazy imports keep cold-start cheap when nothing changed.
     from src.aws_lambda.s3_store import put_json, put_text  # noqa: PLC0415
+
+    try:
+        rows = _snapshots()
+        # Optional: enrich the most-listed knives with real BUFF listing counts
+        # (Sell(N)) when a BUFF cookie is configured in SSM. No-op otherwise.
+        _enrich_listings(ssm, rows, errors)
+        html_body = _render_html(updated_at, rows)
+        _validate_static_payload(rows, html_body)
+    except Exception as exc:  # noqa: BLE001 - boundary
+        errors.append(f"scrape_failed: {type(exc).__name__}")
 
     if rows:
         try:

@@ -43,6 +43,10 @@ data "archive_file" "lambda_zip" {
     content  = file("${path.module}/../../src/aws_lambda/handler_sheets.py")
     filename = "src/aws_lambda/handler_sheets.py"
   }
+  source {
+    content  = file("${path.module}/../../src/aws_lambda/buff_listings.py")
+    filename = "src/aws_lambda/buff_listings.py"
+  }
 }
 
 resource "aws_s3_bucket" "site" {
@@ -222,6 +226,8 @@ resource "aws_lambda_function" "scraper" {
       WORKSHEET_NAME            = var.worksheet_name
       GOOGLE_CREDS_SSM_PARAM    = var.google_creds_ssm_param
       DISCORD_WEBHOOK_SSM_PARAM = var.discord_webhook_ssm_param
+      BUFF_COOKIE_SSM_PARAM     = var.buff_cookie_ssm_param
+      LISTING_PAGES             = tostring(var.listing_pages)
     }
   }
 
