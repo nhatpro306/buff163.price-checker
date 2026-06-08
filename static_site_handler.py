@@ -158,6 +158,30 @@ def _csgo_api_image_map() -> dict[str, str]:
     return images
 
 
+def _strip_variant_prefix(name: str) -> str:
+    """Drop StatTrak / Souvenir prefixes so variants reuse the base skin image.
+
+    csgo-api lists one image per base skin; StatTrak and Souvenir versions share
+    the same artwork, so matching on the base name fills most missing images.
+    """
+    out = name
+    for prefix in ("StatTrak™ ", "StatTrak ", "Souvenir "):
+        if out.startswith(prefix):
+            out = out[len(prefix):]
+    return out.strip()
+
+
+def _lookup_image(image_map: dict[str, str], clean_name: str, full_name: str) -> str:
+    """Try full name, base name (no wear), then variant-stripped forms."""
+    base_full = _strip_variant_prefix(full_name)
+    base_clean = _strip_variant_prefix(clean_name)
+    for key in (clean_name, full_name, base_clean, base_full):
+        hit = image_map.get(key)
+        if hit:
+            return hit
+    return ""
+
+
 def _match_knife_type(name: str, keywords: list[str]) -> str | None:
     clean_name = name.lower()
     for keyword in sorted(keywords, key=len, reverse=True):
@@ -256,7 +280,7 @@ def _snapshots() -> list[dict[str, Any]]:
         highest_order_price = _decimal_or_none(highest_order.get("price"))
         if highest_order_price is not None:
             reference_price = float(highest_order_price * usd_to_cny)
-        image_url = image_map.get(clean_name, "") or image_map.get(full_name, "")
+        image_url = _lookup_image(image_map, clean_name, full_name)
         image_fallback_url = _static_item_image_url(knife_type)
         wear = WEAR_ABBREVIATIONS.get(condition, condition or "N/A")
         price_cny = round(float(price), 2)
@@ -887,6 +911,29 @@ def _render_html(updated_at: str, rows: list[dict[str, Any]]) -> str:
     .fam-card img { width: 42px; height: 32px; object-fit: contain; }
     .fam-card .fam-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; font-size: 12.5px; color: var(--muted); }
     .fam-card .fam-meta strong { color: var(--text); font-variant-numeric: tabular-nums; }
+    #familyBrowser { display: none; }
+    #familyBrowser.open { display: block; }
+    #skinSearch { width: 100%; min-height: 40px; padding: 0 12px; border-radius: 10px; background: rgba(7,10,16,.6); border: 1px solid var(--line); color: var(--text); }
+    .skin-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); max-height: 460px; overflow-y: auto; padding-right: 4px; }
+    .skin-pick {
+      display: flex; gap: 10px; align-items: center; text-align: left;
+      padding: 10px; border-radius: 12px;
+      background: rgba(7,10,16,.55); border: 1px solid var(--line);
+    }
+    .skin-pick:hover { border-color: var(--line-strong); transform: translateY(-2px); }
+    .skin-pick.selected-row { border-color: var(--gold); background: rgba(245,179,66,.10); }
+    .skin-pick img { width: 54px; height: 40px; object-fit: contain; flex: 0 0 auto; }
+    .skin-pick .sp-body { min-width: 0; }
+    .skin-pick strong { display: block; font-size: 13px; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .skin-pick span { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .wear-ladder { display: flex; flex-direction: column; gap: 6px; }
+    .wl-row { display: grid; grid-template-columns: 42px 1fr auto; gap: 10px; align-items: center; }
+    .wl-row .wl-wear { font-weight: 700; font-size: 12px; color: var(--muted); }
+    .wl-row.active .wl-wear { color: var(--gold); }
+    .wl-bar { height: 10px; border-radius: 999px; background: rgba(255,255,255,.06); overflow: hidden; }
+    .wl-bar > i { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--gold), var(--orange)); }
+    .wl-row .wl-price { font-variant-numeric: tabular-nums; font-size: 12.5px; }
+    .wl-row.missing .wl-price { color: var(--muted); }
     .table-actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 16px; color: var(--muted); font-size: 12px; }
     .load-more {
       min-height: 38px;
@@ -985,6 +1032,12 @@ def _render_html(updated_at: str, rows: list[dict[str, Any]]) -> str:
     <div class="family-grid" id="familyCards" style="margin-top:14px"></div>
   </section>
 
+  <section class="panel" style="margin-top:16px" id="familyBrowser" aria-label="Skins in selected family">
+    <div class="panel-title"><div><span class="panel-kicker">Pick a skin</span><h2 id="familyBrowserTitle">Skins</h2></div><span class="badge" id="familyBrowserCount">0 skins</span></div>
+    <input id="skinSearch" placeholder="Filter skins in this family" style="margin-bottom:12px">
+    <div class="skin-grid" id="skinGrid"></div>
+  </section>
+
   <section class="panel item-detail" aria-label="Selected item detail">
     <div class="detail-media">
       <img class="detail-art" id="detailImage" src="__INITIAL_DETAIL_IMAGE__" alt="__INITIAL_DETAIL_NAME__ image">
@@ -1010,6 +1063,10 @@ def _render_html(updated_at: str, rows: list[dict[str, Any]]) -> str:
       <div>
         <span class="panel-kicker">Wear</span>
         <div class="wear-row" id="wearButtons"></div>
+      </div>
+      <div style="margin-top:14px">
+        <span class="panel-kicker">How wear affects this skin</span>
+        <div class="wear-ladder" id="wearLadder"></div>
       </div>
     </div>
   </section>
@@ -1111,8 +1168,15 @@ const relatedItems = document.getElementById("relatedItems");
 const relatedCount = document.getElementById("relatedCount");
 const priceChartBadge = document.getElementById("priceChartBadge");
 const imageByKnife = Object.fromEntries(knifeTypes.map(item => [item.name, item.image_url]));
+const wearLadder = document.getElementById("wearLadder");
+const familyBrowser = document.getElementById("familyBrowser");
+const familyBrowserTitle = document.getElementById("familyBrowserTitle");
+const familyBrowserCount = document.getElementById("familyBrowserCount");
+const skinGrid = document.getElementById("skinGrid");
+const skinSearch = document.getElementById("skinSearch");
 let tableLimit = 300;
 let selectedRow = [...rows].sort((a,b) => rowPrice(b) - rowPrice(a))[0] || rows[0] || null;
+let selectedFamily = "";
 const wearOrder = ["FN", "MW", "FT", "WW", "BS"];
 function money(value) { return value == null ? "N/A" : Number(value).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) + " CNY"; }
 function escapeHtml(value) {
@@ -1155,16 +1219,67 @@ function selectedFamilyRows() {
 }
 function setKnifeFilter(value) {
   knifeType.value = value;
+  selectedFamily = value;
+  if (skinSearch) skinSearch.value = "";
   tableLimit = 300;
   const candidates = rows.filter(row => !value || row.knife_type === value);
   if (candidates.length) selectedRow = [...candidates].sort((a,b) => rowPrice(b) - rowPrice(a))[0];
   render();
+  if (value) familyBrowser?.scrollIntoView({behavior: "smooth", block: "start"});
 }
 function selectRow(row) {
   selectedRow = row;
   knifeType.value = row.knife_type || "";
   render();
-  document.querySelector(".item-detail")?.scrollIntoView({behavior: "smooth", block: "nearest"});
+  document.querySelector(".item-detail")?.scrollIntoView({behavior: "smooth", block: "start"});
+}
+function renderFamilyBrowser() {
+  if (!familyBrowser) return;
+  if (!selectedFamily) { familyBrowser.classList.remove("open"); return; }
+  familyBrowser.classList.add("open");
+  familyBrowserTitle.textContent = selectedFamily;
+  const q = (skinSearch?.value || "").toLowerCase();
+  let pool = rows.filter(r => r.knife_type === selectedFamily);
+  if (q) pool = pool.filter(r => `${r.item_name} ${r.skin_name} ${r.condition}`.toLowerCase().includes(q));
+  pool.sort((a,b) => rowPrice(b) - rowPrice(a));
+  familyBrowserCount.textContent = `${pool.length.toLocaleString()} skins`;
+  if (!pool.length) {
+    skinGrid.innerHTML = `<div class="empty-state"><div><strong>No skins</strong><p>No skins match in this family.</p></div></div>`;
+    return;
+  }
+  skinGrid.innerHTML = pool.map(r => {
+    const sel = selectedRow && r.goods_id === selectedRow.goods_id;
+    return `<button class="skin-pick ${sel ? "selected-row" : ""}" type="button" data-id="${escapeHtml(r.goods_id)}">
+      <img src="${escapeHtml(imageForRow(r) || FALLBACK_IMG)}" alt="" loading="lazy" onerror="imgFallback(this)">
+      <div class="sp-body"><strong>${escapeHtml(r.skin_name || r.item_name)}</strong><span>${escapeHtml(r.wear || r.condition)} &middot; ${money(r.price ?? r.price_cny)} &middot; ${spreadText(r)}</span></div>
+    </button>`;
+  }).join("");
+  skinGrid.querySelectorAll("button").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const m = rows.find(r => r.goods_id === btn.dataset.id);
+      if (m) selectRow(m);
+    });
+  });
+}
+function renderWearLadder() {
+  if (!wearLadder || !selectedRow) return;
+  const sameSkin = rows.filter(r => r.item_name === selectedRow.item_name);
+  const prices = sameSkin.map(rowPrice).filter(p => p > 0);
+  const max = prices.length ? Math.max(...prices) : 1;
+  wearLadder.innerHTML = wearOrder.map(w => {
+    const m = sameSkin.find(r => r.wear === w);
+    if (!m) return `<div class="wl-row missing"><span class="wl-wear">${w}</span><div class="wl-bar"></div><span class="wl-price">N/A</span></div>`;
+    const p = rowPrice(m);
+    const pct = Math.max((p / max) * 100, 3);
+    const active = selectedRow.wear === w ? " active" : "";
+    return `<div class="wl-row${active}" data-id="${escapeHtml(m.goods_id)}" style="cursor:pointer"><span class="wl-wear">${w}</span><div class="wl-bar"><i style="width:${pct}%"></i></div><span class="wl-price">${money(p)}</span></div>`;
+  }).join("");
+  wearLadder.querySelectorAll(".wl-row[data-id]").forEach(el => {
+    el.addEventListener("click", () => {
+      const m = rows.find(r => r.goods_id === el.dataset.id);
+      if (m) selectRow(m);
+    });
+  });
 }
 function renderKnifeRail() {
   const active = knifeType.value;
@@ -1206,6 +1321,7 @@ function renderDetail() {
       if (match) selectRow(match);
     });
   });
+  renderWearLadder();
 }
 function filteredRows() {
   const q = search.value.toLowerCase();
@@ -1402,7 +1518,8 @@ function renderMarketSignals() {
     });
   });
 }
-function render() { renderKnifeRail(); renderFamilyCards(); renderDetail(); renderTable(); renderPriceChart(); renderRelatedItems(); renderInsights(); renderSourceHealth(); renderMarketSignals(); }
+function render() { renderKnifeRail(); renderFamilyCards(); renderFamilyBrowser(); renderDetail(); renderTable(); renderPriceChart(); renderRelatedItems(); renderInsights(); renderSourceHealth(); renderMarketSignals(); }
+skinSearch?.addEventListener("input", renderFamilyBrowser);
 search.addEventListener("input", () => { tableLimit = 300; render(); });
 knifeType.addEventListener("change", () => { tableLimit = 300; render(); });
 condition.addEventListener("change", () => { tableLimit = 300; render(); });
@@ -1412,6 +1529,8 @@ document.getElementById("resetFilters")?.addEventListener("click", () => {
   knifeType.value = "";
   condition.value = "";
   sort.value = "price-desc";
+  selectedFamily = "";
+  if (skinSearch) skinSearch.value = "";
   tableLimit = 300;
   render();
 });
