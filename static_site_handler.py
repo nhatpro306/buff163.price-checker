@@ -180,43 +180,25 @@ def _spread(row: dict[str, Any]) -> str:
     return f"{percent:+.1f}%"
 
 
-def _listing_display(value: Any) -> tuple[str, str]:
-    """Return (text, liquidity class). null -> N/A / unknown; 0 -> 0 / zero."""
-    if value is None:
-        return "N/A", "unknown"
-    try:
-        count = int(value)
-    except (TypeError, ValueError):
-        return "N/A", "unknown"
-    if count <= 0:
-        return "0", "zero"
-    if count >= 50:
-        return f"{count:,}", "high"
-    if count >= 10:
-        return f"{count:,}", "medium"
-    return f"{count:,}", "low"
-
-
 def _table_row_html(row: dict[str, Any]) -> str:
     image_url = html.escape(
-        str(row.get("image_url") or _static_item_image_url(str(row.get("category") or "Knife")))
+        str(row.get("image_url") or _static_item_image_url(str(row.get("knife_type") or "Knife")))
     )
     item_name = html.escape(str(row.get("item_name") or row.get("skin_name") or "Unknown item"))
-    category = html.escape(str(row.get("category") or row.get("knife_type") or "Unknown"))
-    family = html.escape(str(row.get("family") or "Unknown"))
+    family = html.escape(str(row.get("knife_type") or row.get("family") or "Unknown"))
+    condition = html.escape(str(row.get("condition") or "N/A"))
     wear = html.escape(str(row.get("wear") or row.get("condition") or "N/A"))
-    listings_text, liquidity = _listing_display(row.get("listing_count", row.get("listings")))
     source = html.escape(str(row.get("source") or ""))
     goods_id = html.escape(str(row.get("goods_id") or ""))
     return (
         f'<tr data-id="{goods_id}"><td><div class="skin-cell">'
-        f'<img class="skin-thumb" src="{image_url}" alt="" loading="lazy">'
-        f"<div><strong>{item_name}</strong><small>{category} / {family}</small></div>"
+        f'<img class="skin-thumb" src="{image_url}" alt="" loading="lazy" '
+        f"onerror=\"this.onerror=null;this.src=FALLBACK_IMG\">"
+        f"<div><strong>{item_name}</strong><small>{family} &middot; {condition}</small></div>"
         f'</div></td><td><span class="pill">{wear}</span></td>'
         f'<td class="right">{_money(row.get("price") or row.get("price_cny"))}</td>'
         f'<td class="right">{_money(row.get("reference_price_cny"))}</td>'
         f'<td>{_spread(row)}</td>'
-        f'<td><span class="liquidity liq-{liquidity}">{listings_text}</span></td>'
         f"<td>{source}</td></tr>"
     )
 
@@ -776,7 +758,7 @@ def _render_html(updated_at: str, rows: list[dict[str, Any]]) -> str:
       background: rgba(255,255,255,.045);
     }
     .insight strong { display: block; margin-bottom: 6px; }
-    .table-tools { display: grid; grid-template-columns: 1fr 170px 160px 160px 170px auto; gap: 10px; margin-bottom: 14px; }
+    .table-tools { display: grid; grid-template-columns: 1fr 180px 170px 180px auto; gap: 10px; margin-bottom: 14px; }
     .reset-btn { min-height: 38px; padding: 0 14px; border-radius: 10px; color: #c8dcff; }
     input, select {
       width: 100%; min-height: 42px; border-radius: 10px; border: 1px solid rgba(255,255,255,.13);
@@ -997,17 +979,10 @@ def _render_html(updated_at: str, rows: list[dict[str, Any]]) -> str:
     </div>
   </section>
 
-  <section class="coverage panel" aria-label="Knife family coverage">
-    <div>
-      <span class="panel-kicker">All knife list</span>
-      <h2 style="margin:4px 0 0">Browse by knife family</h2>
-    </div>
+  <section class="panel" style="margin-top:16px" aria-label="Knife families">
+    <div class="panel-title"><div><span class="panel-kicker">All knife list</span><h2>Browse by knife family</h2></div><span class="badge" id="familyCount">0 families</span></div>
     <div class="family-rail" id="knifeRail"></div>
-  </section>
-
-  <section class="panel" aria-label="Knife family picture atlas">
-    <div class="panel-title"><div><span class="panel-kicker">Knife pictures</span><h2>Visual family atlas</h2></div><span class="badge">20 tracked families</span></div>
-    <div class="knife-atlas" id="knifeAtlas"></div>
+    <div class="family-grid" id="familyCards" style="margin-top:14px"></div>
   </section>
 
   <section class="panel item-detail" aria-label="Selected item detail">
@@ -1027,7 +1002,7 @@ def _render_html(updated_at: str, rows: list[dict[str, Any]]) -> str:
       <div class="detail-prices">
         <div class="price-tile"><span>Latest price</span><strong id="detailLatestPrice">__INITIAL_DETAIL_PRICE__</strong></div>
         <div class="price-tile"><span>Reference price</span><strong id="detailReferencePrice">__INITIAL_DETAIL_REF__</strong></div>
-        <div class="price-tile"><span>Listings</span><strong id="detailListings" class="liquidity liq-unknown">N/A</strong></div>
+        <div class="price-tile"><span>Spread</span><strong id="detailSpread">__INITIAL_DETAIL_SPREAD__</strong></div>
       </div>
       <div class="detail-actions">
         <a id="detailBuffLink" class="buff-link" href="__INITIAL_BUFF_SEARCH__" target="_blank" rel="noopener noreferrer">Search on BUFF163 &rarr;</a>
@@ -1039,15 +1014,9 @@ def _render_html(updated_at: str, rows: list[dict[str, Any]]) -> str:
     </div>
   </section>
 
-  <section class="layout">
-    <div class="panel">
-      <div class="panel-title"><div><span class="panel-kicker">Price history</span><h2>Selected item price view</h2></div><span class="badge" id="priceChartBadge">Same category</span></div>
-      <div id="priceChart" class="chart-wrap"></div>
-    </div>
-    <div class="panel">
-      <div class="panel-title"><div><span class="panel-kicker">Listing count</span><h2>Selected item listing view</h2></div><span class="badge">Static snapshot</span></div>
-      <div id="listingChart" class="chart-wrap"></div>
-    </div>
+  <section class="panel" style="margin-top:16px">
+    <div class="panel-title"><div><span class="panel-kicker">Price history</span><h2>Selected family price curve</h2></div><span class="badge" id="priceChartBadge">Same family</span></div>
+    <div id="priceChart" class="chart-wrap"></div>
   </section>
 
   <section class="panel" style="margin-top:16px">
@@ -1070,13 +1039,8 @@ def _render_html(updated_at: str, rows: list[dict[str, Any]]) -> str:
     </aside>
   </section>
 
-  <section class="panel" style="margin-top:16px" aria-label="Knife families">
-    <div class="panel-title"><div><span class="panel-kicker">Knife families</span><h2>Browse by family</h2></div><span class="badge" id="familyCount">0 families</span></div>
-    <div class="family-grid" id="familyCards"></div>
-  </section>
-
-  <section class="panel" style="margin-top:16px" aria-label="Listing monitor">
-    <div class="panel-title"><div><span class="panel-kicker">Listing monitor</span><h2>Liquidity signals</h2></div><span class="badge" id="listingMonitorBadge">Loading</span></div>
+  <section class="panel" style="margin-top:16px" aria-label="Market signals">
+    <div class="panel-title"><div><span class="panel-kicker">Market signals</span><h2>Price highlights</h2></div></div>
     <div class="listing-monitor-grid" id="listingMonitor"></div>
   </section>
 
@@ -1095,18 +1059,10 @@ def _render_html(updated_at: str, rows: list[dict[str, Any]]) -> str:
       <select id="knifeType"><option value="">All knife families</option></select>
       <label class="visually-hidden" for="condition">Condition</label>
       <select id="condition"><option value="">All conditions</option></select>
-      <label class="visually-hidden" for="listingFilter">Listing status</label>
-      <select id="listingFilter">
-        <option value="">All listings</option>
-        <option value="has">Has listings</option>
-        <option value="unknown">Unknown listings</option>
-        <option value="zero">Zero listings</option>
-      </select>
       <label class="visually-hidden" for="sort">Sort</label>
       <select id="sort">
         <option value="price-desc">Price high to low</option>
         <option value="price-asc">Price low to high</option>
-        <option value="listings-desc">Listings high to low</option>
         <option value="spread-desc">Spread high to low</option>
         <option value="spread-asc">Spread low to high</option>
         <option value="name">Name A-Z</option>
@@ -1116,7 +1072,7 @@ def _render_html(updated_at: str, rows: list[dict[str, Any]]) -> str:
     </div>
     <div class="table-shell">
       <table>
-        <thead><tr><th>Item</th><th>Wear</th><th class="right">Price</th><th class="right">Reference</th><th>Spread</th><th>Listings</th><th>Source</th></tr></thead>
+        <thead><tr><th>Item</th><th>Wear</th><th class="right">Price</th><th class="right">Reference</th><th>Spread</th><th>Source</th></tr></thead>
         <tbody id="rows">__INITIAL_TABLE_ROWS__</tbody>
       </table>
     </div>
@@ -1138,7 +1094,6 @@ const tableCount = document.getElementById("tableCount");
 const tableNote = document.getElementById("tableNote");
 const loadMore = document.getElementById("loadMore");
 const knifeRail = document.getElementById("knifeRail");
-const knifeAtlas = document.getElementById("knifeAtlas");
 const detailImage = document.getElementById("detailImage");
 const detailName = document.getElementById("detailName");
 const detailQuality = document.getElementById("detailQuality");
@@ -1146,8 +1101,11 @@ const detailCategory = document.getElementById("detailCategory");
 const detailType = document.getElementById("detailType");
 const detailLatestPrice = document.getElementById("detailLatestPrice");
 const detailReferencePrice = document.getElementById("detailReferencePrice");
-const detailListings = document.getElementById("detailListings");
+const detailSpread = document.getElementById("detailSpread");
 const wearButtons = document.getElementById("wearButtons");
+// Inline gradient SVG used whenever a Steam CDN image 404s or is missing.
+const FALLBACK_IMG = "data:image/svg+xml;utf8," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 120"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="#f5b342"/><stop offset=".55" stop-color="#ff7a1a"/><stop offset="1" stop-color="#111827"/></linearGradient></defs><rect width="160" height="120" rx="14" fill="#0b101a"/><path d="M119 21 139 41 70 110 45 115 50 90Z" fill="url(#g)"/><path d="M47 82 78 113" stroke="#f8d08a" stroke-width="7" stroke-linecap="round"/></svg>');
+function imgFallback(el) { el.onerror = null; el.src = FALLBACK_IMG; }
 const detailBuffLink = document.getElementById("detailBuffLink");
 const relatedItems = document.getElementById("relatedItems");
 const relatedCount = document.getElementById("relatedCount");
@@ -1181,38 +1139,19 @@ function rowPrice(row) {
   const price = Number(row.price ?? row.price_cny ?? 0);
   return Number.isFinite(price) ? price : 0;
 }
-function listingValue(row) {
-  // Returns the raw listing count number, or null when unknown.
-  const raw = row.listing_count !== undefined ? row.listing_count : row.listings;
-  if (raw === null || raw === undefined) return null;
-  const count = Number(raw);
-  return Number.isFinite(count) ? count : null;
+function spreadValue(row) {
+  const v = Number(row.spread_percent);
+  return Number.isFinite(v) ? v : null;
 }
-function listingCount(row) {
-  // Numeric form for charts/sorting. Unknown -> 0 so it stops sorting on top.
-  const v = listingValue(row);
-  return v === null ? 0 : v;
-}
-function listingDisplay(row) {
-  const v = listingValue(row);
-  if (v === null) return { text: "N/A", cls: "unknown", numeric: 0 };
-  if (v <= 0) return { text: "0", cls: "zero", numeric: 0 };
-  if (v >= 50) return { text: v.toLocaleString(), cls: "high", numeric: v };
-  if (v >= 10) return { text: v.toLocaleString(), cls: "medium", numeric: v };
-  return { text: v.toLocaleString(), cls: "low", numeric: v };
-}
-function liquidityLabel(cls) {
-  return ({ high: "High liquidity", medium: "Medium", low: "Low supply", zero: "No listings", unknown: "Unknown" })[cls] || cls;
+function spreadText(row) {
+  const v = spreadValue(row);
+  if (v === null) return spread(row);
+  return `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
 }
 function selectedFamilyRows() {
   if (!selectedRow) return rows;
   const familyRows = rows.filter(row => row.family === selectedRow.family);
   return familyRows.length ? familyRows : [selectedRow];
-}
-function selectedCategoryRows() {
-  if (!selectedRow) return rows;
-  const categoryRows = rows.filter(row => row.category === selectedRow.category);
-  return categoryRows.length ? categoryRows : [selectedRow];
 }
 function setKnifeFilter(value) {
   knifeType.value = value;
@@ -1237,29 +1176,18 @@ function renderKnifeRail() {
     button.addEventListener("click", () => setKnifeFilter(button.dataset.knife || ""));
   });
 }
-function renderKnifeAtlas() {
-  knifeAtlas.innerHTML = knifeTypes.map(item => `<button class="knife-card" type="button" data-knife="${escapeHtml(item.name)}">
-    <img class="knife-art" src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.name)} picture">
-    <div><strong>${escapeHtml(item.name)}</strong><span>${item.count.toLocaleString()} BUFF-compatible rows${item.has_source_image ? "" : " / placeholder art"}</span></div>
-  </button>`).join("");
-  knifeAtlas.querySelectorAll("button").forEach(button => {
-    button.addEventListener("click", () => setKnifeFilter(button.dataset.knife || ""));
-  });
-}
 function renderDetail() {
   if (!selectedRow) return;
-  detailImage.src = imageForRow(selectedRow);
-  detailImage.alt = `${selectedRow.item_name || selectedRow.skin_name} image`;
-  detailName.textContent = selectedRow.item_name || selectedRow.skin_name || "Unknown item";
+  detailImage.onerror = () => imgFallback(detailImage);
+  detailImage.src = imageForRow(selectedRow) || FALLBACK_IMG;
+  detailImage.alt = `${selectedRow.skin_name || selectedRow.item_name} image`;
+  detailName.textContent = selectedRow.skin_name || selectedRow.item_name || "Unknown item";
   detailQuality.textContent = selectedRow.wear || selectedRow.condition || "N/A";
-  detailCategory.textContent = selectedRow.category || selectedRow.knife_type || "N/A";
+  detailCategory.textContent = selectedRow.condition || "N/A";
   detailType.textContent = selectedRow.knife_type || "N/A";
   detailLatestPrice.textContent = money(selectedRow.price ?? selectedRow.price_cny);
   detailReferencePrice.textContent = money(selectedRow.reference_price_cny);
-  const sld = listingDisplay(selectedRow);
-  detailListings.textContent = sld.text;
-  detailListings.className = "liquidity liq-" + sld.cls;
-  detailListings.title = liquidityLabel(sld.cls);
+  detailSpread.textContent = spreadText(selectedRow);
   if (detailBuffLink) {
     const q = encodeURIComponent(selectedRow.market_hash_name || selectedRow.item_name || "");
     detailBuffLink.href = selectedRow.buff_url || `https://buff.163.com/market/csgo#tab=selling&page_num=1&search=${q}`;
@@ -1283,23 +1211,15 @@ function filteredRows() {
   const q = search.value.toLowerCase();
   const selectedKnife = knifeType.value;
   const selectedCondition = condition.value;
-  const lf = (document.getElementById("listingFilter") || {value: ""}).value;
   const filtered = rows.filter(row => {
     if (selectedKnife && row.knife_type !== selectedKnife) return false;
     if (selectedCondition && row.condition !== selectedCondition) return false;
-    if (lf) {
-      const v = listingValue(row);
-      if (lf === "has"     && !(v != null && v > 0)) return false;
-      if (lf === "unknown" && v !== null) return false;
-      if (lf === "zero"    && v !== 0) return false;
-    }
     if (q && !`${row.skin_name} ${row.item_name} ${row.family} ${row.knife_type} ${row.condition}`.toLowerCase().includes(q)) return false;
     return true;
   });
   filtered.sort((a,b) => {
     const s = sort.value;
     if (s === "price-asc")    return rowPrice(a) - rowPrice(b);
-    if (s === "listings-desc")return listingCount(b) - listingCount(a);
     if (s === "spread-desc")  return (Number(b.spread_percent)||-Infinity) - (Number(a.spread_percent)||-Infinity);
     if (s === "spread-asc")   return Math.abs(Number(a.spread_percent)||Infinity) - Math.abs(Number(b.spread_percent)||Infinity);
     if (s === "name")         return String(a.skin_name||"").localeCompare(String(b.skin_name||""));
@@ -1316,8 +1236,7 @@ function renderTable() {
   loadMore.hidden = visible.length >= filtered.length;
   tbody.innerHTML = visible.map(row => {
     const isSelected = selectedRow && row.goods_id === selectedRow.goods_id;
-    const ld = listingDisplay(row);
-    return `<tr data-id="${escapeHtml(row.goods_id)}" class="${isSelected ? "selected-row" : ""}"><td><div class="skin-cell"><img class="skin-thumb" src="${escapeHtml(imageForRow(row))}" alt="" loading="lazy"><div><strong>${escapeHtml(row.item_name || row.skin_name)}</strong><small>${escapeHtml(row.category || row.knife_type || "Unknown")} / ${escapeHtml(row.family || "Unknown")}</small></div></div></td><td><span class="pill">${escapeHtml(row.wear || row.condition || "N/A")}</span></td><td class="right">${money(row.price ?? row.price_cny)}</td><td class="right">${money(row.reference_price_cny)}</td><td>${spread(row)}</td><td><span class="liquidity liq-${ld.cls}" title="${escapeHtml(liquidityLabel(ld.cls))}">${ld.text}</span></td><td>${escapeHtml(row.source)}</td></tr>`;
+    return `<tr data-id="${escapeHtml(row.goods_id)}" class="${isSelected ? "selected-row" : ""}"><td><div class="skin-cell"><img class="skin-thumb" src="${escapeHtml(imageForRow(row) || FALLBACK_IMG)}" alt="" loading="lazy" onerror="imgFallback(this)"><div><strong>${escapeHtml(row.item_name || row.skin_name)}</strong><small>${escapeHtml(row.knife_type || "Unknown")} &middot; ${escapeHtml(row.condition || "N/A")}</small></div></div></td><td><span class="pill">${escapeHtml(row.wear || row.condition || "N/A")}</span></td><td class="right">${money(row.price ?? row.price_cny)}</td><td class="right">${money(row.reference_price_cny)}</td><td>${spreadText(row)}</td><td>${escapeHtml(row.source)}</td></tr>`;
   }).join("");
   tbody.querySelectorAll("tr").forEach(rowEl => {
     rowEl.addEventListener("click", () => {
@@ -1350,24 +1269,6 @@ function renderPriceChart() {
     <text class="axis" x="${pad}" y="22">High ${money(max)}</text><text class="axis" x="${pad}" y="${h-8}">Low ${money(min)}</text>
   </svg>`;
 }
-function renderListingChart() {
-  const host = document.getElementById("listingChart");
-  const pool = selectedFamilyRows();
-  const liquid = pool.filter(row => listingValue(row) && listingValue(row) > 0).slice(0, 40);
-  if (!liquid.length) {
-    const unknownCount = pool.filter(row => listingValue(row) === null).length;
-    const zeroCount = pool.filter(row => listingValue(row) === 0).length;
-    host.innerHTML = `<div class="empty-state"><div><strong>Listing data unavailable</strong><p>The csgotrader free-tier feed publishes price references but not live order-book depth. ${unknownCount.toLocaleString()} items in this family show <code>N/A</code> for listings; ${zeroCount.toLocaleString()} confirmed zero. Real listing counts require BUFF163 API access with cookies.</p></div></div>`;
-    return;
-  }
-  const w = 900, h = 280, pad = 30;
-  const max = Math.max(...liquid.map(row => listingCount(row)), 1);
-  const barW = (w - pad * 2) / liquid.length;
-  host.innerHTML = `<svg class="chart" viewBox="0 0 ${w} ${h}"><defs><linearGradient id="barGradient" x1="0" x2="0" y1="0" y2="1"><stop stop-color="#f5b342"/><stop offset="1" stop-color="#ff7a1a"/></linearGradient></defs>${liquid.map((row, i) => {
-    const barH = (listingCount(row) / max) * (h - pad * 2);
-    return `<rect class="bar" x="${pad + i * barW}" y="${h - pad - barH}" width="${Math.max(barW - 4, 2)}" height="${barH}"></rect>`;
-  }).join("")}</svg>`;
-}
 function renderRelatedItems() {
   if (!selectedRow) return;
   // Ranking: 1) same skin (item_name) other wears, 2) same family (weapon),
@@ -1383,10 +1284,9 @@ function renderRelatedItems() {
     return;
   }
   relatedItems.innerHTML = related.map(row => {
-    const ld = listingDisplay(row);
     return `<button class="related-card" type="button" data-id="${escapeHtml(row.goods_id)}">
-      <img src="${escapeHtml(imageForRow(row))}" alt="" loading="lazy">
-      <div><strong>${escapeHtml(row.skin_name || row.item_name)}</strong><span>${escapeHtml(row.wear || row.condition)} / ${money(row.price ?? row.price_cny)} / <span class="liquidity liq-${ld.cls}">${ld.text}</span></span></div>
+      <img src="${escapeHtml(imageForRow(row) || FALLBACK_IMG)}" alt="" loading="lazy" onerror="imgFallback(this)">
+      <div><strong>${escapeHtml(row.skin_name || row.item_name)}</strong><span>${escapeHtml(row.wear || row.condition)} &middot; ${money(row.price ?? row.price_cny)}</span></div>
     </button>`;
   }).join("");
   relatedItems.querySelectorAll("button").forEach(button => {
@@ -1416,37 +1316,27 @@ function renderSourceHealth() {
   const total = rows.length;
   const withPrice = rows.filter(r => rowPrice(r) > 0).length;
   const withRef = rows.filter(r => Number.isFinite(Number(r.reference_price_cny))).length;
-  const withListing = rows.filter(r => listingValue(r) !== null).length;
-  const unknownListing = total - withListing;
+  const withSpread = rows.filter(r => spreadValue(r) !== null).length;
   const withImage = rows.filter(r => r.image_url).length;
   const withGoodsId = rows.filter(r => r.goods_id).length;
-  const familiesCount = new Set(rows.map(r => r.family).filter(Boolean)).size;
-  const listingCoverage = total ? withListing / total : 0;
-  const status = unknownListing === 0 ? "Healthy" : (listingCoverage >= 0.5 ? "Partial" : "Warning");
+  const familiesCount = new Set(rows.map(r => r.knife_type).filter(Boolean)).size;
+  const status = (withPrice === total && withImage === total) ? "Healthy" : "Partial";
   badge.textContent = status;
   badge.className = "badge " + (status === "Healthy" ? "live" : "");
   const items = [
     ["Total items", total.toLocaleString()],
     ["Items with price", withPrice.toLocaleString()],
     ["With reference price", withRef.toLocaleString()],
-    ["With listing data", withListing.toLocaleString()],
-    ["Unknown listing", unknownListing.toLocaleString()],
+    ["With spread", withSpread.toLocaleString()],
     ["With image", withImage.toLocaleString()],
     ["With goods_id", withGoodsId.toLocaleString()],
     ["Knife families", familiesCount.toLocaleString()],
+    ["Source", "csgotrader / BUFF163"],
   ];
   host.innerHTML = items.map(([k, v]) =>
     `<div class="health-item"><span>${escapeHtml(k)}</span><strong>${v}</strong></div>`
   ).join("");
-  if (listingCoverage < 0.05) {
-    warn.hidden = false;
-    warn.innerHTML = `<strong>Listing data unavailable.</strong> The current free-tier feed (csgotrader public BUFF163 JSON) publishes price references but not live order-book depth. Listings show <code>N/A</code>, not <code>0</code>. To populate real listing counts, the scraper would need to call the BUFF163 goods API with a valid cookie (out of scope for the cost-safe public path).`;
-  } else if (listingCoverage < 0.5) {
-    warn.hidden = false;
-    warn.innerHTML = `<strong>Listing data coverage is low.</strong> ${unknownListing.toLocaleString()} items show <code>N/A</code> for listings. <code>0</code> only appears for items the scraper confirmed have no active listings.`;
-  } else {
-    warn.hidden = true;
-  }
+  warn.hidden = true;
 }
 function renderFamilyCards() {
   const host = document.getElementById("familyCards");
@@ -1466,7 +1356,7 @@ function renderFamilyCards() {
     const mx = prices.length ? Math.max(...prices) : 0;
     const img = imageByKnife[f.name] || (f.items.find(r => r.image_url)?.image_url) || "";
     return `<button class="fam-card" type="button" data-knife="${escapeHtml(f.name)}">
-      <div class="fam-head"><img src="${escapeHtml(img)}" alt="" loading="lazy"><strong>${escapeHtml(f.name)}</strong></div>
+      <div class="fam-head"><img src="${escapeHtml(img || FALLBACK_IMG)}" alt="" loading="lazy" onerror="imgFallback(this)"><strong>${escapeHtml(f.name)}</strong></div>
       <div class="fam-meta">
         <span>Items <strong>${f.items.length.toLocaleString()}</strong></span>
         <span>Avg <strong>${money(avg)}</strong></span>
@@ -1479,41 +1369,31 @@ function renderFamilyCards() {
     btn.addEventListener("click", () => setKnifeFilter(btn.dataset.knife || ""));
   });
 }
-function renderListingMonitor() {
+function renderMarketSignals() {
   const host = document.getElementById("listingMonitor");
-  const badge = document.getElementById("listingMonitorBadge");
   if (!host) return;
-  const unknownCount = rows.filter(r => listingValue(r) === null).length;
-  const total = rows.length;
-  const liveCount = total - unknownCount;
-  badge.textContent = liveCount ? `${liveCount.toLocaleString()} with depth` : "Listing data unavailable";
-  badge.className = "badge " + (liveCount ? "live" : "");
-
-  // 5 cards always shown. With unknown listing data, three are price-only
-  // signals; the listing-specific ones explain the gap honestly.
   const byPrice = [...rows].sort((a,b) => rowPrice(b) - rowPrice(a));
   const top = byPrice[0];
   const cheap = byPrice.filter(r => rowPrice(r) > 0).pop();
-  const withSpread = rows.filter(r => Number.isFinite(Number(r.spread_percent)));
+  const withSpread = rows.filter(r => spreadValue(r) !== null);
   const biggestSpread = [...withSpread].sort((a,b) => (b.spread_percent||0) - (a.spread_percent||0))[0];
   const tightestSpread = [...withSpread].sort((a,b) => Math.abs(a.spread_percent||0) - Math.abs(b.spread_percent||0))[0];
 
-  function card(kicker, row, hint, klass) {
-    if (!row) return `<div class="lm-card"><span class="panel-kicker">${escapeHtml(kicker)}</span><strong>No data</strong><span class="muted">${escapeHtml(hint||"")}</span></div>`;
+  function card(kicker, row, hint) {
+    if (!row) return `<div class="lm-card"><span class="panel-kicker">${escapeHtml(kicker)}</span><strong>No data</strong></div>`;
     return `<button class="lm-card" type="button" data-id="${escapeHtml(row.goods_id)}" style="text-align:left;cursor:pointer">
       <span class="panel-kicker">${escapeHtml(kicker)}</span>
       <strong>${escapeHtml(row.skin_name || row.item_name)}</strong>
       <span class="muted">${escapeHtml(hint)}</span>
-      <span class="pricepill">${money(row.price_cny)} / ${row.spread_percent != null ? (row.spread_percent>=0?"+":"") + row.spread_percent.toFixed(1) + "%" : "N/A"}</span>
+      <span class="pricepill">${money(row.price_cny)} &middot; ${spreadText(row)}</span>
     </button>`;
   }
 
   host.innerHTML = [
     card("Highest tracked price", top, top ? `${top.knife_type} / ${top.wear}` : ""),
     card("Cheapest valid item", cheap, cheap ? `${cheap.knife_type} / ${cheap.wear}` : ""),
-    card("Biggest spread (price vs ref)", biggestSpread, biggestSpread ? `${biggestSpread.knife_type} / ${biggestSpread.wear}` : ""),
+    card("Biggest spread vs reference", biggestSpread, biggestSpread ? `${biggestSpread.knife_type} / ${biggestSpread.wear}` : ""),
     card("Tightest spread", tightestSpread, tightestSpread ? `${tightestSpread.knife_type} / ${tightestSpread.wear}` : ""),
-    `<div class="lm-card"><span class="panel-kicker">Listing depth</span><strong>${unknownCount === total ? "Unavailable" : `${liveCount.toLocaleString()} of ${total.toLocaleString()}`}</strong><span class="muted">${unknownCount === total ? "csgotrader public feed has no order-book depth. Items show N/A, not 0." : `${unknownCount.toLocaleString()} items show N/A; 0 means confirmed zero.`}</span></div>`,
   ].join("");
   host.querySelectorAll("button.lm-card").forEach(btn => {
     btn.addEventListener("click", () => {
@@ -1522,17 +1402,15 @@ function renderListingMonitor() {
     });
   });
 }
-function render() { renderKnifeRail(); renderKnifeAtlas(); renderDetail(); renderTable(); renderPriceChart(); renderListingChart(); renderRelatedItems(); renderInsights(); renderSourceHealth(); renderFamilyCards(); renderListingMonitor(); }
+function render() { renderKnifeRail(); renderFamilyCards(); renderDetail(); renderTable(); renderPriceChart(); renderRelatedItems(); renderInsights(); renderSourceHealth(); renderMarketSignals(); }
 search.addEventListener("input", () => { tableLimit = 300; render(); });
 knifeType.addEventListener("change", () => { tableLimit = 300; render(); });
 condition.addEventListener("change", () => { tableLimit = 300; render(); });
 sort.addEventListener("change", () => { tableLimit = 300; render(); });
-document.getElementById("listingFilter")?.addEventListener("change", () => { tableLimit = 300; render(); });
 document.getElementById("resetFilters")?.addEventListener("click", () => {
   search.value = "";
   knifeType.value = "";
   condition.value = "";
-  const lf = document.getElementById("listingFilter"); if (lf) lf.value = "";
   sort.value = "price-desc";
   tableLimit = 300;
   render();
@@ -1561,10 +1439,11 @@ render();
             "name": str(initial_row.get("skin_name") or initial_row.get("item_name") or "Select an item"),
             "image": str(initial_row.get("image_url") or _static_item_image_url("Knife")),
             "quality": str(initial_row.get("wear") or initial_row.get("condition") or "N/A"),
-            "category": str(initial_row.get("category") or initial_row.get("knife_type") or "N/A"),
+            "category": str(initial_row.get("condition") or "N/A"),
             "type": str(initial_row.get("knife_type") or "N/A"),
             "price": _money(initial_row.get("price_cny")),
             "ref": _money(initial_row.get("reference_price_cny")),
+            "spread": _spread(initial_row),
             "search": "https://buff.163.com/market/csgo#tab=selling&page_num=1&search="
             + urllib.parse.quote(str(initial_row.get("market_hash_name") or "")),
         }
@@ -1577,6 +1456,7 @@ render();
             "type": "N/A",
             "price": "N/A",
             "ref": "N/A",
+            "spread": "N/A",
             "search": "https://buff.163.com/market/csgo",
         }
 
@@ -1605,6 +1485,7 @@ render();
         "__INITIAL_DETAIL_TYPE__": html.escape(initial_detail["type"]),
         "__INITIAL_DETAIL_PRICE__": html.escape(initial_detail["price"]),
         "__INITIAL_DETAIL_REF__": html.escape(initial_detail["ref"]),
+        "__INITIAL_DETAIL_SPREAD__": html.escape(initial_detail["spread"]),
         "__INITIAL_BUFF_SEARCH__": html.escape(initial_detail["search"]),
     }
     for token, value in replacements.items():

@@ -53,22 +53,23 @@ def test_static_site_handler_writes_html_and_json(monkeypatch):
     assert b"BUFF163 Market Intelligence" in html_body
     assert b"underpriced CS2 knives faster" in html_body
     assert b"priceChart" in html_body
-    assert b"Listing count" in html_body
     assert b"All knife list" in html_body
     assert b"knifeRail" in html_body
+    assert b"familyCards" in html_body
     assert b"Load more" in html_body
-    assert b"Knife pictures" in html_body
-    assert b"knifeAtlas" in html_body
     assert b"skin-thumb" in html_body
     assert b"Buff.163 item detail" in html_body
     assert b"detailImage" in html_body
     assert b"wearButtons" in html_body
     assert b"Related items" in html_body
     assert b"relatedItems" in html_body
-    assert b"Selected item price view" in html_body
+    assert b"Selected family price curve" in html_body
     assert b"selectedFamilyRows" in html_body
     assert b"selected-row" in html_body
-    assert b"Listing data unavailable" in html_body
+    assert b"FALLBACK_IMG" in html_body
+    # Listing UI removed: csgotrader feed has no order-book depth.
+    assert b"Selected item listing view" not in html_body
+    assert b"Liquidity signals" not in html_body
     data_body = next(write["Body"] for write in writes if write["Key"] == "data.json")
     assert b"knife_type" in data_body
     assert b"item_name" in data_body
@@ -105,7 +106,6 @@ def test_static_site_handler_filters_bad_prices_and_validates_fallbacks(monkeypa
     assert rows[0]["wear"] == "MW"
     assert '<tbody id="rows"><tr' in html_body
     assert "selectedFamilyRows" in html_body
-    assert "Listing data unavailable" in html_body
     static_site_handler._validate_static_payload(rows, html_body)
 
 
