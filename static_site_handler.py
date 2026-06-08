@@ -1138,35 +1138,148 @@ render();
 
 
 def lambda_handler(event: dict[str, Any] | None = None, context: Any = None) -> dict[str, Any]:
-    bucket = os.environ["STATIC_SITE_BUCKET"]
+    """Free-tier Lambda entry.
+
+    Reuses the existing in-file scrape (_snapshots, _render_html) and wires in:
+      - S3 hash-dedupe (src.aws_lambda.s3_store) -> stays under Free Tier PUTs
+      - Append-only history + raw backup with lifecycle expiry
+      - Optional Google Sheets write (WRITE_SHEETS=1)
+      - Optional Discord failure alert (webhook from SSM)
+    Never raises: errors are captured into the JSON summary.
+    """
+    started = time.monotonic()
+    event = event or {}
+    bucket = os.environ.get("STATIC_SITE_BUCKET") or os.environ.get("S3_BUCKET", "")
     prefix = os.getenv("STATIC_SITE_PREFIX", "").strip("/")
     key_prefix = f"{prefix}/" if prefix else ""
     updated_at = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
-    started = time.monotonic()
-    rows = _snapshots()
-    html_body = _render_html(updated_at, rows)
-    _validate_static_payload(rows, html_body)
+    iso_now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    if event.get("mode") == "health_check" or os.getenv("BUFF_HEALTH_CHECK") == "1":
+        return {
+            "status": "success",
+            "items_scraped": 0,
+            "items_saved": 0,
+            "errors": [],
+            "timestamp": iso_now,
+            "mode": "health_check",
+            "bucket": bucket,
+        }
+
+    if not bucket:
+        return {
+            "status": "error",
+            "items_scraped": 0,
+            "items_saved": 0,
+            "errors": ["bucket env not set (STATIC_SITE_BUCKET or S3_BUCKET)"],
+            "timestamp": iso_now,
+        }
+
+    errors: list[str] = []
+    rows: list[dict[str, Any]] = []
+    items_saved = 0
+    html_body = ""
+
+    try:
+        rows = _snapshots()
+        html_body = _render_html(updated_at, rows)
+        _validate_static_payload(rows, html_body)
+    except Exception as exc:  # noqa: BLE001 - boundary
+        errors.append(f"scrape_failed: {type(exc).__name__}")
+
     import boto3  # noqa: PLC0415
 
     s3 = boto3.client("s3")
-    s3.put_object(
-        Bucket=bucket,
-        Key=f"{key_prefix}data.json",
-        Body=json.dumps({"updated_at": updated_at, "rows": rows}).encode("utf-8"),
-        ContentType="application/json",
-        CacheControl="max-age=300",
-    )
-    s3.put_object(
-        Bucket=bucket,
-        Key=f"{key_prefix}index.html",
-        Body=html_body.encode("utf-8"),
-        ContentType="text/html; charset=utf-8",
-        CacheControl="max-age=300",
-    )
-    return {
-        "ok": True,
-        "rows": len(rows),
+    ssm = boto3.client("ssm")
+
+    # Lazy imports keep cold-start cheap when nothing changed.
+    from src.aws_lambda.s3_store import put_json, put_text  # noqa: PLC0415
+
+    if rows:
+        try:
+            # Static dashboard payloads (overwrite latest, dedupe by sha).
+            data_result = put_json(
+                s3,
+                bucket,
+                f"{key_prefix}data.json",
+                {"updated_at": updated_at, "rows": rows},
+            )
+            put_text(
+                s3,
+                bucket,
+                f"{key_prefix}index.html",
+                html_body,
+                content_type="text/html; charset=utf-8",
+            )
+            put_json(
+                s3,
+                bucket,
+                f"{key_prefix}current/snapshots.json",
+                rows,
+            )
+            put_json(
+                s3,
+                bucket,
+                f"{key_prefix}current/meta.json",
+                {"last_run_at": iso_now, "items": len(rows), "version": 1},
+                dedupe=False,
+            )
+            # Append-only history backup only when content actually changed.
+            if data_result.get("written"):
+                now_dt = datetime.now(UTC)
+                yyyy = f"{now_dt.year:04d}"
+                mm = f"{now_dt.month:02d}"
+                dd = f"{now_dt.day:02d}"
+                hhmmss = now_dt.strftime("%H%M%S")
+                put_json(
+                    s3,
+                    bucket,
+                    f"{key_prefix}history/{yyyy}/{mm}/{dd}/snapshots-{hhmmss}.json",
+                    rows,
+                    dedupe=False,
+                )
+            items_saved = len(rows)
+        except Exception as exc:  # noqa: BLE001 - boundary
+            errors.append(f"s3_write_failed: {type(exc).__name__}")
+
+    # Optional Google Sheets write — gated by WRITE_SHEETS=1.
+    sheets_saved = 0
+    if os.getenv("WRITE_SHEETS", "").strip() in {"1", "true", "True"}:
+        try:
+            from src.aws_lambda.handler_sheets import write_sheets  # noqa: PLC0415
+
+            sheets_saved, sheets_errors = write_sheets(ssm, rows, iso_now)
+            errors.extend(sheets_errors)
+        except Exception as exc:  # noqa: BLE001 - boundary
+            errors.append(f"sheets_write_failed: {type(exc).__name__}")
+
+    status = "success" if rows and not errors else ("partial_success" if rows else "error")
+    summary: dict[str, Any] = {
+        "status": status,
+        "ok": status == "success",
+        "rows": len(rows),  # legacy compatibility
+        "items_scraped": len(rows),
+        "items_saved": items_saved,
+        "items_saved_sheets": sheets_saved,
+        "errors": errors,
+        "timestamp": iso_now,
         "bucket": bucket,
         "prefix": prefix,
         "duration_seconds": round(time.monotonic() - started, 2),
     }
+
+    # Failure alert (one Discord POST max, redacted webhook from SSM).
+    if status != "success":
+        try:
+            from src.aws_lambda.alerts import send_discord_alert  # noqa: PLC0415
+
+            webhook_param = os.getenv("DISCORD_WEBHOOK_SSM_PARAM", "").strip()
+            if webhook_param:
+                ssm_out = ssm.get_parameter(Name=webhook_param, WithDecryption=True)
+                webhook = (ssm_out.get("Parameter") or {}).get("Value") or ""
+                if webhook:
+                    send_discord_alert(webhook, status, summary)
+        except Exception:  # noqa: BLE001 - alert is best-effort
+            pass
+
+    return summary

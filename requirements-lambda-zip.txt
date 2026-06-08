@@ -1,0 +1,16 @@
+# Optional dependencies for the free-tier Lambda zip.
+#
+# The base path (static_site_handler.lambda_handler) needs ONLY the Python
+# stdlib + boto3 (boto3 is in the Lambda runtime, no install required).
+#
+# Install these ONLY when WRITE_SHEETS=1 and you want Lambda to also append
+# rows to Google Sheets. Then rebuild the deployment zip and re-apply
+# infra/aws-free-tier.
+#
+# Recommended install command for a local build:
+#   pip install -r requirements-lambda-zip.txt -t infra/aws-free-tier/build/deps
+# Then add `${path.module}/build/deps` as a second source_dir in the
+# archive_file (see docs/aws-free-tier-deploy.md).
+
+gspread>=6,<7
+google-auth>=2,<3

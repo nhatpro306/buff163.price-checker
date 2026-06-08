@@ -7,8 +7,42 @@ locals {
 
 data "archive_file" "lambda_zip" {
   type        = "zip"
-  source_file = "${path.module}/../../static_site_handler.py"
   output_path = "${path.module}/build/static_site_handler.zip"
+
+  # Lambda entry.
+  source {
+    content  = file("${path.module}/../../static_site_handler.py")
+    filename = "static_site_handler.py"
+  }
+
+  # Shared helpers (S3 dedupe, alerts, sheets, config).
+  # Empty src/__init__.py stub: the real src/__init__.py imports heavy modules
+  # (pandas, gspread, etc.) that are not in the Lambda zip. Use a stub so
+  # `from src.aws_lambda.X import Y` resolves without pulling those imports.
+  source {
+    content  = "# stub init for Lambda zip\n"
+    filename = "src/__init__.py"
+  }
+  source {
+    content  = file("${path.module}/../../src/aws_lambda/__init__.py")
+    filename = "src/aws_lambda/__init__.py"
+  }
+  source {
+    content  = file("${path.module}/../../src/aws_lambda/config.py")
+    filename = "src/aws_lambda/config.py"
+  }
+  source {
+    content  = file("${path.module}/../../src/aws_lambda/s3_store.py")
+    filename = "src/aws_lambda/s3_store.py"
+  }
+  source {
+    content  = file("${path.module}/../../src/aws_lambda/alerts.py")
+    filename = "src/aws_lambda/alerts.py"
+  }
+  source {
+    content  = file("${path.module}/../../src/aws_lambda/handler_sheets.py")
+    filename = "src/aws_lambda/handler_sheets.py"
+  }
 }
 
 resource "aws_s3_bucket" "site" {
@@ -129,8 +163,12 @@ resource "aws_iam_role" "lambda" {
 
 data "aws_iam_policy_document" "lambda" {
   statement {
-    sid       = "WriteStaticSite"
-    actions   = ["s3:PutObject"]
+    sid = "WriteStaticSite"
+    actions = [
+      "s3:PutObject",
+      "s3:GetObject",
+      "s3:HeadObject",
+    ]
     resources = ["${aws_s3_bucket.site.arn}/*"]
   }
 
@@ -142,6 +180,14 @@ data "aws_iam_policy_document" "lambda" {
     ]
     resources = ["${aws_cloudwatch_log_group.scraper.arn}:*"]
   }
+
+  statement {
+    sid     = "ReadConfigSecrets"
+    actions = ["ssm:GetParameter", "ssm:GetParameters"]
+    resources = [
+      "arn:aws:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/buff163/*",
+    ]
+  }
 }
 
 resource "aws_iam_role_policy" "lambda" {
@@ -151,24 +197,71 @@ resource "aws_iam_role_policy" "lambda" {
 }
 
 resource "aws_lambda_function" "scraper" {
-  function_name    = "${var.project}-static-scraper"
-  role             = aws_iam_role.lambda.arn
-  runtime          = "python3.11"
-  handler          = "static_site_handler.lambda_handler"
-  filename         = data.archive_file.lambda_zip.output_path
-  source_code_hash = data.archive_file.lambda_zip.output_base64sha256
-  memory_size      = var.lambda_memory_mb
-  timeout          = var.lambda_timeout_seconds
+  function_name                  = "${var.project}-static-scraper"
+  role                           = aws_iam_role.lambda.arn
+  runtime                        = "python3.11"
+  handler                        = "static_site_handler.lambda_handler"
+  filename                       = data.archive_file.lambda_zip.output_path
+  source_code_hash               = data.archive_file.lambda_zip.output_base64sha256
+  memory_size                    = var.lambda_memory_mb
+  timeout                        = var.lambda_timeout_seconds
+  reserved_concurrent_executions = var.lambda_reserved_concurrency
 
   environment {
     variables = {
-      STATIC_SITE_BUCKET  = aws_s3_bucket.site.bucket
-      BUFF_TRACK_KEYWORDS = var.track_keywords
-      BUFF_MIN_PRICE_CNY  = "0"
+      STATIC_SITE_BUCKET        = aws_s3_bucket.site.bucket
+      S3_BUCKET                 = aws_s3_bucket.site.bucket
+      AWS_REGION_HINT           = data.aws_region.current.region
+      BUFF_TRACK_KEYWORDS       = var.track_keywords
+      BUFF_MIN_PRICE_CNY        = "0"
+      LOG_LEVEL                 = var.log_level
+      REQUEST_TIMEOUT_SECONDS   = tostring(var.request_timeout_seconds)
+      MAX_RETRIES               = tostring(var.max_retries)
+      WRITE_SHEETS              = var.write_sheets ? "1" : "0"
+      SPREADSHEET_ID            = var.spreadsheet_id
+      WORKSHEET_NAME            = var.worksheet_name
+      GOOGLE_CREDS_SSM_PARAM    = var.google_creds_ssm_param
+      DISCORD_WEBHOOK_SSM_PARAM = var.discord_webhook_ssm_param
     }
   }
 
   depends_on = [aws_cloudwatch_log_group.scraper]
+}
+
+# --- S3 lifecycle: cap storage growth from history/ and raw/ ---------------
+resource "aws_s3_bucket_lifecycle_configuration" "site" {
+  bucket = aws_s3_bucket.site.id
+
+  rule {
+    id     = "expire-raw"
+    status = "Enabled"
+    filter {
+      prefix = "raw/"
+    }
+    expiration {
+      days = var.raw_keep_days
+    }
+  }
+
+  rule {
+    id     = "expire-history"
+    status = "Enabled"
+    filter {
+      prefix = "history/"
+    }
+    expiration {
+      days = var.history_keep_days
+    }
+  }
+
+  rule {
+    id     = "abort-incomplete-multipart"
+    status = "Enabled"
+    filter {}
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 1
+    }
+  }
 }
 
 resource "aws_scheduler_schedule" "scraper" {

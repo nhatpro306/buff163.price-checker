@@ -51,3 +51,69 @@ variable "monthly_budget_usd" {
   type        = string
   default     = "1.00"
 }
+
+variable "lambda_reserved_concurrency" {
+  description = "Reserved concurrency cap. Set to a positive number to harden against fan-out. Default -1 = unreserved (required on accounts with the default 10-concurrency quota where reserving any value would drop UnreservedConcurrentExecutions below the AWS minimum of 10)."
+  type        = number
+  default     = -1
+}
+
+variable "log_level" {
+  description = "Python logging level for the Lambda."
+  type        = string
+  default     = "INFO"
+}
+
+variable "request_timeout_seconds" {
+  description = "HTTP request timeout for upstream scrape calls."
+  type        = number
+  default     = 15
+}
+
+variable "max_retries" {
+  description = "Retry attempts on upstream scrape failure."
+  type        = number
+  default     = 3
+}
+
+variable "raw_keep_days" {
+  description = "Days to keep raw/ S3 backups before lifecycle deletion."
+  type        = number
+  default     = 14
+}
+
+variable "history_keep_days" {
+  description = "Days to keep history/ S3 snapshots before lifecycle deletion."
+  type        = number
+  default     = 90
+}
+
+variable "write_sheets" {
+  description = "Set true to also write Google Sheets from Lambda. Requires spreadsheet_id, worksheet_name, and google_creds_ssm_param."
+  type        = bool
+  default     = false
+}
+
+variable "spreadsheet_id" {
+  description = "Google Sheets spreadsheet ID (only when write_sheets=true)."
+  type        = string
+  default     = ""
+}
+
+variable "worksheet_name" {
+  description = "Target worksheet name (only when write_sheets=true)."
+  type        = string
+  default     = ""
+}
+
+variable "google_creds_ssm_param" {
+  description = "SSM Parameter Store path holding service-account JSON. Create manually as SecureString."
+  type        = string
+  default     = "/buff163/google-creds"
+}
+
+variable "discord_webhook_ssm_param" {
+  description = "SSM Parameter Store path holding the Discord webhook URL. Create manually as SecureString. Leave empty to skip Discord alerts."
+  type        = string
+  default     = ""
+}

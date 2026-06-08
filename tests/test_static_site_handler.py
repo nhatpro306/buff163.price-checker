@@ -39,7 +39,14 @@ def test_static_site_handler_writes_html_and_json(monkeypatch):
 
     assert result["ok"] is True
     assert result["rows"] == 1
-    assert {write["Key"] for write in writes} == {"index.html", "data.json"}
+    written_keys = {write["Key"] for write in writes}
+    # Free-tier write set: legacy static-dashboard pair + canonical current/* keys
+    # + a history snapshot when content changed. Extra keys are allowed; the
+    # core pair must always be present.
+    assert {"index.html", "data.json"}.issubset(written_keys)
+    assert "current/snapshots.json" in written_keys
+    assert "current/meta.json" in written_keys
+    assert any(k.startswith("history/") for k in written_keys)
     html_body = next(write["Body"] for write in writes if write["Key"] == "index.html")
     assert b"Karambit | Doppler" in html_body
     assert b'<tbody id="rows"><tr' in html_body
@@ -65,7 +72,7 @@ def test_static_site_handler_writes_html_and_json(monkeypatch):
     data_body = next(write["Body"] for write in writes if write["Key"] == "data.json")
     assert b"knife_type" in data_body
     assert b"item_name" in data_body
-    assert b'"wear": "FN"' in data_body
+    assert b'"wear":"FN"' in data_body  # compact json (no spaces) saves S3 bytes
     assert b"listing_count" in data_body
     assert b"image_url" in data_body
     assert b"category" in data_body
