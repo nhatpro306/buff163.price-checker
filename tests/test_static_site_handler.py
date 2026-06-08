@@ -51,7 +51,7 @@ def test_static_site_handler_writes_html_and_json(monkeypatch):
     assert b"Karambit | Doppler" in html_body
     assert b'<tbody id="rows"><tr' in html_body
     assert b"BUFF163 Market Intelligence" in html_body
-    assert b"CS2 knife market intelligence" in html_body
+    assert b"underpriced CS2 knives faster" in html_body
     assert b"priceChart" in html_body
     assert b"Listing count" in html_body
     assert b"All knife list" in html_body

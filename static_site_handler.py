@@ -264,29 +264,34 @@ def _snapshots() -> list[dict[str, Any]]:
         price = price_usd * usd_to_cny
         if price < min_price:
             continue
-        family, condition = _split_market_name(clean_name)
+        full_name, condition = _split_market_name(clean_name)
+        # Drop the upstream summary rows that aggregate a knife with no wear
+        # (e.g. base "Bayonet" without a specific skin/condition). They pollute
+        # the table with N/A wear and have no real per-skin meaning.
+        if condition == "Unknown":
+            continue
         reference_price = None
         highest_order_price = _decimal_or_none(highest_order.get("price"))
         if highest_order_price is not None:
             reference_price = float(highest_order_price * usd_to_cny)
-        image_url = image_map.get(clean_name, "") or image_map.get(family, "")
+        image_url = image_map.get(clean_name, "") or image_map.get(full_name, "")
         image_fallback_url = _static_item_image_url(knife_type)
         wear = WEAR_ABBREVIATIONS.get(condition, condition or "N/A")
         price_cny = round(float(price), 2)
         reference_price_cny = round(reference_price, 2) if reference_price else None
+        # family = weapon (e.g. "Bayonet"), skin_name = full ("Bayonet | Autotronic (Factory New)")
+        family = knife_type
         rows.append(
             {
                 "goods_id": _source_id(clean_name),
                 "market_hash_name": clean_name,
-                "item_name": (
-                    f"{family} ({condition})" if condition != "Unknown" else family
-                ),
+                "item_name": full_name,  # e.g. "Bayonet | Autotronic"
+                "skin_name": f"{full_name} ({condition})",
                 "knife_type": knife_type,
                 "weapon_type": "Knife",
-                "category": knife_type or "Unknown",
-                "family": family,
-                "skin_name": f"{family} ({condition})" if condition != "Unknown" else family,
-                "condition": condition or "Unknown",
+                "category": knife_type,
+                "family": family,  # weapon only (e.g. "Bayonet")
+                "condition": condition,
                 "condition_short": wear,
                 "wear": wear,
                 "price": price_cny,
@@ -299,7 +304,6 @@ def _snapshots() -> list[dict[str, Any]]:
                 ),
                 # csgotrader public feed does not include order-book depth.
                 # Use null (unknown), NOT 0 (which would mean confirmed zero listings).
-                "listings": None,
                 "listing_count": None,
                 "sell_min_price": price_cny,
                 "buy_max_price": (
@@ -307,7 +311,9 @@ def _snapshots() -> list[dict[str, Any]]:
                     if highest_order_price is not None
                     else None
                 ),
-                "buff_url": None,  # goods_id is a content hash, not a Buff numeric id
+                # buff_url: goods_id from csgotrader is a content hash, not a BUFF
+                # numeric id. Frontend opens a search URL using market_hash_name instead.
+                "buff_url": None,
                 "image_url": image_url or image_fallback_url,
                 "has_source_image": bool(image_url),
                 "source": "csgotrader buff163",
@@ -770,7 +776,8 @@ def _render_html(updated_at: str, rows: list[dict[str, Any]]) -> str:
       background: rgba(255,255,255,.045);
     }
     .insight strong { display: block; margin-bottom: 6px; }
-    .table-tools { display: grid; grid-template-columns: 1fr 190px 190px 170px; gap: 10px; margin-bottom: 14px; }
+    .table-tools { display: grid; grid-template-columns: 1fr 170px 160px 160px 170px auto; gap: 10px; margin-bottom: 14px; }
+    .reset-btn { min-height: 38px; padding: 0 14px; border-radius: 10px; color: #c8dcff; }
     input, select {
       width: 100%; min-height: 42px; border-radius: 10px; border: 1px solid rgba(255,255,255,.13);
       background: rgba(7, 10, 16, .72); color: var(--text); padding: 10px 12px;
@@ -851,6 +858,53 @@ def _render_html(updated_at: str, rows: list[dict[str, Any]]) -> str:
       border: 1px solid rgba(245,179,66,.32);
       color: #ffd58a; font-size: 13px; line-height: 1.55;
     }
+    .detail-actions { margin-top: 14px; }
+    .buff-link {
+      display: inline-flex; align-items: center; gap: 6px;
+      min-height: 38px; padding: 8px 14px;
+      border-radius: 10px; text-decoration: none;
+      background: linear-gradient(135deg, var(--gold), var(--orange));
+      color: #1a1004; font-weight: 700; font-size: 14px;
+      transition: transform .18s ease, box-shadow .18s ease;
+    }
+    .buff-link:hover { transform: translateY(-2px); box-shadow: 0 10px 28px rgba(245,179,66,.28); }
+    .listing-monitor-grid {
+      display: grid; gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      margin-top: 14px;
+    }
+    .lm-card {
+      padding: 14px; border-radius: 12px;
+      background: rgba(7,10,16,.55);
+      border: 1px solid var(--line);
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .lm-card .panel-kicker { margin: 0; }
+    .lm-card strong { font-size: 15px; line-height: 1.3; color: var(--text); }
+    .lm-card span.muted { font-size: 12.5px; }
+    .lm-card .pricepill {
+      align-self: flex-start; margin-top: 4px;
+      font-variant-numeric: tabular-nums; font-size: 13px;
+      padding: 3px 8px; border-radius: 999px;
+      background: rgba(245,179,66,.12); color: #ffd58a;
+      border: 1px solid rgba(245,179,66,.24);
+    }
+    .family-grid {
+      display: grid; gap: 12px; margin-top: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    }
+    .fam-card {
+      padding: 14px; border-radius: 12px;
+      background: rgba(7,10,16,.55);
+      border: 1px solid var(--line);
+      display: flex; flex-direction: column; gap: 8px;
+      cursor: pointer; transition: transform .18s ease, border-color .18s ease;
+    }
+    .fam-card:hover { transform: translateY(-2px); border-color: var(--line-strong); }
+    .fam-card .fam-head { display: flex; align-items: center; gap: 10px; }
+    .fam-card img { width: 42px; height: 32px; object-fit: contain; }
+    .fam-card .fam-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; font-size: 12.5px; color: var(--muted); }
+    .fam-card .fam-meta strong { color: var(--text); font-variant-numeric: tabular-nums; }
     .table-actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 16px; color: var(--muted); font-size: 12px; }
     .load-more {
       min-height: 38px;
@@ -903,18 +957,18 @@ def _render_html(updated_at: str, rows: list[dict[str, Any]]) -> str:
 <main>
   <div class="topbar">
     <div class="brand"><div class="mark">B</div><div>BUFF163 Intelligence</div></div>
-    <div>Static edge dashboard / Updated __UPDATED_AT__ UTC</div>
+    <div><span class="badge live"><span class="dot"></span> Updated __UPDATED_AT__ UTC</span></div>
   </div>
   <section class="hero">
     <div class="hero-grid">
       <div>
         <div class="badge-row">
-          <span class="badge live"><span class="dot"></span> Daily Lambda refresh active</span>
+          <span class="badge live"><span class="dot"></span> Daily Lambda refresh</span>
           <span class="badge">S3 + CloudFront static</span>
-          <span class="badge">No database required</span>
+          <span class="badge">Cost-safe mode</span>
         </div>
-        <h1>CS2 knife market intelligence at the edge.</h1>
-        <p class="subtitle">Track premium BUFF163 reference prices across high-value knife families with a fast static dashboard designed for trading scans, watchlists, and price discovery.</p>
+        <h1>Find underpriced CS2 knives faster with BUFF163 price, listing, and liquidity signals.</h1>
+        <p class="subtitle">Track item-level prices, spread, supply, and market movement from a static edge dashboard. No database, no always-on backend, no surprise bill.</p>
       </div>
       <div class="hero-card">
         <span>Knife coverage</span>
@@ -958,22 +1012,25 @@ def _render_html(updated_at: str, rows: list[dict[str, Any]]) -> str:
 
   <section class="panel item-detail" aria-label="Selected item detail">
     <div class="detail-media">
-      <img class="detail-art" id="detailImage" src="" alt="">
+      <img class="detail-art" id="detailImage" src="__INITIAL_DETAIL_IMAGE__" alt="__INITIAL_DETAIL_NAME__ image">
     </div>
     <div class="detail-content">
       <div class="detail-title">
         <span class="panel-kicker">Buff.163 item detail</span>
-        <h2 id="detailName">Loading item</h2>
+        <h2 id="detailName">__INITIAL_DETAIL_NAME__</h2>
       </div>
       <div class="detail-meta">
-        <span class="badge">Quality <strong id="detailQuality"></strong></span>
-        <span class="badge">Category <strong id="detailCategory"></strong></span>
-        <span class="badge">Type <strong id="detailType"></strong></span>
+        <span class="badge">Quality <strong id="detailQuality">__INITIAL_DETAIL_QUALITY__</strong></span>
+        <span class="badge">Category <strong id="detailCategory">__INITIAL_DETAIL_CATEGORY__</strong></span>
+        <span class="badge">Type <strong id="detailType">__INITIAL_DETAIL_TYPE__</strong></span>
       </div>
       <div class="detail-prices">
-        <div class="price-tile"><span>Latest price</span><strong id="detailLatestPrice">N/A</strong></div>
-        <div class="price-tile"><span>Reference price</span><strong id="detailReferencePrice">N/A</strong></div>
-        <div class="price-tile"><span>Listings</span><strong id="detailListings">0</strong></div>
+        <div class="price-tile"><span>Latest price</span><strong id="detailLatestPrice">__INITIAL_DETAIL_PRICE__</strong></div>
+        <div class="price-tile"><span>Reference price</span><strong id="detailReferencePrice">__INITIAL_DETAIL_REF__</strong></div>
+        <div class="price-tile"><span>Listings</span><strong id="detailListings" class="liquidity liq-unknown">N/A</strong></div>
+      </div>
+      <div class="detail-actions">
+        <a id="detailBuffLink" class="buff-link" href="__INITIAL_BUFF_SEARCH__" target="_blank" rel="noopener noreferrer">Search on BUFF163 &rarr;</a>
       </div>
       <div>
         <span class="panel-kicker">Wear</span>
@@ -1013,6 +1070,16 @@ def _render_html(updated_at: str, rows: list[dict[str, Any]]) -> str:
     </aside>
   </section>
 
+  <section class="panel" style="margin-top:16px" aria-label="Knife families">
+    <div class="panel-title"><div><span class="panel-kicker">Knife families</span><h2>Browse by family</h2></div><span class="badge" id="familyCount">0 families</span></div>
+    <div class="family-grid" id="familyCards"></div>
+  </section>
+
+  <section class="panel" style="margin-top:16px" aria-label="Listing monitor">
+    <div class="panel-title"><div><span class="panel-kicker">Listing monitor</span><h2>Liquidity signals</h2></div><span class="badge" id="listingMonitorBadge">Loading</span></div>
+    <div class="listing-monitor-grid" id="listingMonitor"></div>
+  </section>
+
   <section class="panel source-health" id="sourceHealth">
     <div class="panel-title"><div><span class="panel-kicker">Data quality</span><h2>Dataset coverage</h2></div><span class="badge" id="healthBadge">Loading</span></div>
     <div class="health-grid" id="healthGrid"></div>
@@ -1028,8 +1095,24 @@ def _render_html(updated_at: str, rows: list[dict[str, Any]]) -> str:
       <select id="knifeType"><option value="">All knife families</option></select>
       <label class="visually-hidden" for="condition">Condition</label>
       <select id="condition"><option value="">All conditions</option></select>
+      <label class="visually-hidden" for="listingFilter">Listing status</label>
+      <select id="listingFilter">
+        <option value="">All listings</option>
+        <option value="has">Has listings</option>
+        <option value="unknown">Unknown listings</option>
+        <option value="zero">Zero listings</option>
+      </select>
       <label class="visually-hidden" for="sort">Sort</label>
-      <select id="sort"><option value="price-desc">Price high to low</option><option value="price-asc">Price low to high</option><option value="name">Name A-Z</option></select>
+      <select id="sort">
+        <option value="price-desc">Price high to low</option>
+        <option value="price-asc">Price low to high</option>
+        <option value="listings-desc">Listings high to low</option>
+        <option value="spread-desc">Spread high to low</option>
+        <option value="spread-asc">Spread low to high</option>
+        <option value="name">Name A-Z</option>
+        <option value="family">Family A-Z</option>
+      </select>
+      <button class="reset-btn" id="resetFilters" type="button">Reset</button>
     </div>
     <div class="table-shell">
       <table>
@@ -1065,6 +1148,7 @@ const detailLatestPrice = document.getElementById("detailLatestPrice");
 const detailReferencePrice = document.getElementById("detailReferencePrice");
 const detailListings = document.getElementById("detailListings");
 const wearButtons = document.getElementById("wearButtons");
+const detailBuffLink = document.getElementById("detailBuffLink");
 const relatedItems = document.getElementById("relatedItems");
 const relatedCount = document.getElementById("relatedCount");
 const priceChartBadge = document.getElementById("priceChartBadge");
@@ -1176,15 +1260,21 @@ function renderDetail() {
   detailListings.textContent = sld.text;
   detailListings.className = "liquidity liq-" + sld.cls;
   detailListings.title = liquidityLabel(sld.cls);
-  const sameFamily = rows.filter(row => row.family === selectedRow.family);
+  if (detailBuffLink) {
+    const q = encodeURIComponent(selectedRow.market_hash_name || selectedRow.item_name || "");
+    detailBuffLink.href = selectedRow.buff_url || `https://buff.163.com/market/csgo#tab=selling&page_num=1&search=${q}`;
+  }
+  // Same-skin wear chips: lookup uses item_name so "Bayonet | Autotronic" only
+  // jumps between its own wear variants, not other Bayonet skins.
+  const sameSkin = rows.filter(row => row.item_name === selectedRow.item_name);
   wearButtons.innerHTML = wearOrder.map(wear => {
-    const match = sameFamily.find(row => row.wear === wear);
+    const match = sameSkin.find(row => row.wear === wear);
     const active = selectedRow.wear === wear;
     return `<button class="wear-button ${active ? "active" : ""}" type="button" data-wear="${wear}" ${match ? "" : "disabled"}>${wear}</button>`;
   }).join("");
   wearButtons.querySelectorAll("button").forEach(button => {
     button.addEventListener("click", () => {
-      const match = sameFamily.find(row => row.wear === button.dataset.wear);
+      const match = sameSkin.find(row => row.wear === button.dataset.wear);
       if (match) selectRow(match);
     });
   });
@@ -1193,14 +1283,27 @@ function filteredRows() {
   const q = search.value.toLowerCase();
   const selectedKnife = knifeType.value;
   const selectedCondition = condition.value;
-  const filtered = rows.filter(row => (
-    (!selectedKnife || row.knife_type === selectedKnife) &&
-    (!selectedCondition || row.condition === selectedCondition) &&
-    (!q || `${row.skin_name} ${row.family} ${row.knife_type} ${row.condition}`.toLowerCase().includes(q))
-  ));
+  const lf = (document.getElementById("listingFilter") || {value: ""}).value;
+  const filtered = rows.filter(row => {
+    if (selectedKnife && row.knife_type !== selectedKnife) return false;
+    if (selectedCondition && row.condition !== selectedCondition) return false;
+    if (lf) {
+      const v = listingValue(row);
+      if (lf === "has"     && !(v != null && v > 0)) return false;
+      if (lf === "unknown" && v !== null) return false;
+      if (lf === "zero"    && v !== 0) return false;
+    }
+    if (q && !`${row.skin_name} ${row.item_name} ${row.family} ${row.knife_type} ${row.condition}`.toLowerCase().includes(q)) return false;
+    return true;
+  });
   filtered.sort((a,b) => {
-    if (sort.value === "price-asc") return rowPrice(a) - rowPrice(b);
-    if (sort.value === "name") return a.skin_name.localeCompare(b.skin_name);
+    const s = sort.value;
+    if (s === "price-asc")    return rowPrice(a) - rowPrice(b);
+    if (s === "listings-desc")return listingCount(b) - listingCount(a);
+    if (s === "spread-desc")  return (Number(b.spread_percent)||-Infinity) - (Number(a.spread_percent)||-Infinity);
+    if (s === "spread-asc")   return Math.abs(Number(a.spread_percent)||Infinity) - Math.abs(Number(b.spread_percent)||Infinity);
+    if (s === "name")         return String(a.skin_name||"").localeCompare(String(b.skin_name||""));
+    if (s === "family")       return String(a.family||"").localeCompare(String(b.family||"")) || rowPrice(b) - rowPrice(a);
     return rowPrice(b) - rowPrice(a);
   });
   return filtered;
@@ -1267,15 +1370,25 @@ function renderListingChart() {
 }
 function renderRelatedItems() {
   if (!selectedRow) return;
-  const related = selectedCategoryRows()
-    .filter(row => row.goods_id !== selectedRow.goods_id)
-    .sort((a,b) => rowPrice(b) - rowPrice(a))
-    .slice(0, 8);
-  relatedCount.textContent = `${related.length.toLocaleString()} items`;
-  relatedItems.innerHTML = related.map(row => `<button class="related-card" type="button" data-id="${escapeHtml(row.goods_id)}">
-    <img src="${escapeHtml(imageForRow(row))}" alt="">
-    <div><strong>${escapeHtml(row.item_name || row.skin_name)}</strong><span>${escapeHtml(row.wear || row.condition)} / ${money(row.price ?? row.price_cny)}</span></div>
-  </button>`).join("");
+  // Ranking: 1) same skin (item_name) other wears, 2) same family (weapon),
+  // 3) closest price. Drops the selected row itself.
+  const sameSkin = rows.filter(r => r.item_name === selectedRow.item_name && r.goods_id !== selectedRow.goods_id);
+  const sameFamily = rows.filter(r => r.family === selectedRow.family && r.item_name !== selectedRow.item_name);
+  const target = rowPrice(selectedRow);
+  sameFamily.sort((a, b) => Math.abs(rowPrice(a) - target) - Math.abs(rowPrice(b) - target));
+  const related = [...sameSkin, ...sameFamily].slice(0, 12);
+  relatedCount.textContent = related.length ? `${related.length.toLocaleString()} items` : "0 items";
+  if (!related.length) {
+    relatedItems.innerHTML = `<div class="empty-state"><div><strong>No related items</strong><p>No other items in this skin or family are present in the current dataset.</p></div></div>`;
+    return;
+  }
+  relatedItems.innerHTML = related.map(row => {
+    const ld = listingDisplay(row);
+    return `<button class="related-card" type="button" data-id="${escapeHtml(row.goods_id)}">
+      <img src="${escapeHtml(imageForRow(row))}" alt="" loading="lazy">
+      <div><strong>${escapeHtml(row.skin_name || row.item_name)}</strong><span>${escapeHtml(row.wear || row.condition)} / ${money(row.price ?? row.price_cny)} / <span class="liquidity liq-${ld.cls}">${ld.text}</span></span></div>
+    </button>`;
+  }).join("");
   relatedItems.querySelectorAll("button").forEach(button => {
     button.addEventListener("click", () => {
       const match = rows.find(row => row.goods_id === button.dataset.id);
@@ -1335,11 +1448,95 @@ function renderSourceHealth() {
     warn.hidden = true;
   }
 }
-function render() { renderKnifeRail(); renderKnifeAtlas(); renderDetail(); renderTable(); renderPriceChart(); renderListingChart(); renderRelatedItems(); renderInsights(); renderSourceHealth(); }
+function renderFamilyCards() {
+  const host = document.getElementById("familyCards");
+  const badge = document.getElementById("familyCount");
+  if (!host) return;
+  const families = {};
+  for (const r of rows) {
+    const k = r.knife_type || "Unknown";
+    (families[k] ||= { name: k, items: [] }).items.push(r);
+  }
+  const list = Object.values(families).sort((a, b) => b.items.length - a.items.length);
+  badge.textContent = `${list.length.toLocaleString()} families`;
+  host.innerHTML = list.map(f => {
+    const prices = f.items.map(rowPrice).filter(p => p > 0);
+    const avg = prices.length ? prices.reduce((s,p)=>s+p,0)/prices.length : 0;
+    const mn = prices.length ? Math.min(...prices) : 0;
+    const mx = prices.length ? Math.max(...prices) : 0;
+    const img = imageByKnife[f.name] || (f.items.find(r => r.image_url)?.image_url) || "";
+    return `<button class="fam-card" type="button" data-knife="${escapeHtml(f.name)}">
+      <div class="fam-head"><img src="${escapeHtml(img)}" alt="" loading="lazy"><strong>${escapeHtml(f.name)}</strong></div>
+      <div class="fam-meta">
+        <span>Items <strong>${f.items.length.toLocaleString()}</strong></span>
+        <span>Avg <strong>${money(avg)}</strong></span>
+        <span>Min <strong>${money(mn)}</strong></span>
+        <span>Max <strong>${money(mx)}</strong></span>
+      </div>
+    </button>`;
+  }).join("");
+  host.querySelectorAll("button").forEach(btn => {
+    btn.addEventListener("click", () => setKnifeFilter(btn.dataset.knife || ""));
+  });
+}
+function renderListingMonitor() {
+  const host = document.getElementById("listingMonitor");
+  const badge = document.getElementById("listingMonitorBadge");
+  if (!host) return;
+  const unknownCount = rows.filter(r => listingValue(r) === null).length;
+  const total = rows.length;
+  const liveCount = total - unknownCount;
+  badge.textContent = liveCount ? `${liveCount.toLocaleString()} with depth` : "Listing data unavailable";
+  badge.className = "badge " + (liveCount ? "live" : "");
+
+  // 5 cards always shown. With unknown listing data, three are price-only
+  // signals; the listing-specific ones explain the gap honestly.
+  const byPrice = [...rows].sort((a,b) => rowPrice(b) - rowPrice(a));
+  const top = byPrice[0];
+  const cheap = byPrice.filter(r => rowPrice(r) > 0).pop();
+  const withSpread = rows.filter(r => Number.isFinite(Number(r.spread_percent)));
+  const biggestSpread = [...withSpread].sort((a,b) => (b.spread_percent||0) - (a.spread_percent||0))[0];
+  const tightestSpread = [...withSpread].sort((a,b) => Math.abs(a.spread_percent||0) - Math.abs(b.spread_percent||0))[0];
+
+  function card(kicker, row, hint, klass) {
+    if (!row) return `<div class="lm-card"><span class="panel-kicker">${escapeHtml(kicker)}</span><strong>No data</strong><span class="muted">${escapeHtml(hint||"")}</span></div>`;
+    return `<button class="lm-card" type="button" data-id="${escapeHtml(row.goods_id)}" style="text-align:left;cursor:pointer">
+      <span class="panel-kicker">${escapeHtml(kicker)}</span>
+      <strong>${escapeHtml(row.skin_name || row.item_name)}</strong>
+      <span class="muted">${escapeHtml(hint)}</span>
+      <span class="pricepill">${money(row.price_cny)} / ${row.spread_percent != null ? (row.spread_percent>=0?"+":"") + row.spread_percent.toFixed(1) + "%" : "N/A"}</span>
+    </button>`;
+  }
+
+  host.innerHTML = [
+    card("Highest tracked price", top, top ? `${top.knife_type} / ${top.wear}` : ""),
+    card("Cheapest valid item", cheap, cheap ? `${cheap.knife_type} / ${cheap.wear}` : ""),
+    card("Biggest spread (price vs ref)", biggestSpread, biggestSpread ? `${biggestSpread.knife_type} / ${biggestSpread.wear}` : ""),
+    card("Tightest spread", tightestSpread, tightestSpread ? `${tightestSpread.knife_type} / ${tightestSpread.wear}` : ""),
+    `<div class="lm-card"><span class="panel-kicker">Listing depth</span><strong>${unknownCount === total ? "Unavailable" : `${liveCount.toLocaleString()} of ${total.toLocaleString()}`}</strong><span class="muted">${unknownCount === total ? "csgotrader public feed has no order-book depth. Items show N/A, not 0." : `${unknownCount.toLocaleString()} items show N/A; 0 means confirmed zero.`}</span></div>`,
+  ].join("");
+  host.querySelectorAll("button.lm-card").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const m = rows.find(r => r.goods_id === btn.dataset.id);
+      if (m) selectRow(m);
+    });
+  });
+}
+function render() { renderKnifeRail(); renderKnifeAtlas(); renderDetail(); renderTable(); renderPriceChart(); renderListingChart(); renderRelatedItems(); renderInsights(); renderSourceHealth(); renderFamilyCards(); renderListingMonitor(); }
 search.addEventListener("input", () => { tableLimit = 300; render(); });
 knifeType.addEventListener("change", () => { tableLimit = 300; render(); });
 condition.addEventListener("change", () => { tableLimit = 300; render(); });
 sort.addEventListener("change", () => { tableLimit = 300; render(); });
+document.getElementById("listingFilter")?.addEventListener("change", () => { tableLimit = 300; render(); });
+document.getElementById("resetFilters")?.addEventListener("click", () => {
+  search.value = "";
+  knifeType.value = "";
+  condition.value = "";
+  const lf = document.getElementById("listingFilter"); if (lf) lf.value = "";
+  sort.value = "price-desc";
+  tableLimit = 300;
+  render();
+});
 loadMore.addEventListener("click", () => { tableLimit += 300; render(); });
 render();
 </script>
@@ -1352,6 +1549,37 @@ render();
         "icon_flash": '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m13 2-8 12h7l-1 8 8-12h-7l1-8Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>',
         "icon_target": '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/></svg>',
     }
+    # Pre-render the initial selected-item details so "Loading item" never
+    # appears to the user, even if JS is slow or blocked.
+    initial_row = max(
+        rows,
+        key=lambda r: (r.get("price_cny") or 0),
+        default=None,
+    )
+    if initial_row:
+        initial_detail = {
+            "name": str(initial_row.get("skin_name") or initial_row.get("item_name") or "Select an item"),
+            "image": str(initial_row.get("image_url") or _static_item_image_url("Knife")),
+            "quality": str(initial_row.get("wear") or initial_row.get("condition") or "N/A"),
+            "category": str(initial_row.get("category") or initial_row.get("knife_type") or "N/A"),
+            "type": str(initial_row.get("knife_type") or "N/A"),
+            "price": _money(initial_row.get("price_cny")),
+            "ref": _money(initial_row.get("reference_price_cny")),
+            "search": "https://buff.163.com/market/csgo#tab=selling&page_num=1&search="
+            + urllib.parse.quote(str(initial_row.get("market_hash_name") or "")),
+        }
+    else:
+        initial_detail = {
+            "name": "Select an item",
+            "image": _static_item_image_url("Knife"),
+            "quality": "N/A",
+            "category": "N/A",
+            "type": "N/A",
+            "price": "N/A",
+            "ref": "N/A",
+            "search": "https://buff.163.com/market/csgo",
+        }
+
     replacements = {
         "__UPDATED_AT__": html.escape(updated_at),
         "__COUNT__": f"{count:,}",
@@ -1370,6 +1598,14 @@ render();
         "__ICON_CHART__": icons["icon_chart"],
         "__ICON_FLASH__": icons["icon_flash"],
         "__ICON_TARGET__": icons["icon_target"],
+        "__INITIAL_DETAIL_NAME__": html.escape(initial_detail["name"]),
+        "__INITIAL_DETAIL_IMAGE__": html.escape(initial_detail["image"]),
+        "__INITIAL_DETAIL_QUALITY__": html.escape(initial_detail["quality"]),
+        "__INITIAL_DETAIL_CATEGORY__": html.escape(initial_detail["category"]),
+        "__INITIAL_DETAIL_TYPE__": html.escape(initial_detail["type"]),
+        "__INITIAL_DETAIL_PRICE__": html.escape(initial_detail["price"]),
+        "__INITIAL_DETAIL_REF__": html.escape(initial_detail["ref"]),
+        "__INITIAL_BUFF_SEARCH__": html.escape(initial_detail["search"]),
     }
     for token, value in replacements.items():
         template = template.replace(token, value)
