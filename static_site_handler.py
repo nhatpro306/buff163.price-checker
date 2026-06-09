@@ -1485,14 +1485,23 @@ function _fmtDate(ms) {
   const d = new Date(ms);
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 }
+function seriesPair(gid) {
+  // Normalises both legacy ([[ts,p],...]) and new ({listing:[],buy_order:[]})
+  // shapes of priceHistory entries to {listing, buy_order}. Returns null when
+  // there's no usable data for the goods_id.
+  const raw = gid ? priceHistory[gid] : null;
+  if (!raw) return null;
+  if (Array.isArray(raw)) return { listing: raw, buy_order: [] };
+  return { listing: raw.listing || [], buy_order: raw.buy_order || [] };
+}
 function renderPriceChart() {
   const host = document.getElementById("priceChart");
   if (!host) return;
   const gid = goodsIdOf(selectedRow);
-  const series = gid && priceHistory[gid] ? priceHistory[gid] : null;
-  if (series && series.length >= 2) {
+  const pair = seriesPair(gid);
+  if (pair && pair.listing.length >= 2) {
     if (priceChartTitle) priceChartTitle.textContent = `${selectedRow.skin_name || selectedRow.item_name} — BUFF price history`;
-    renderTimeSeries(host, series);
+    renderTimeSeries(host, pair);
     return;
   }
   // Fallback: pick nearest item in the same family that DOES have BUFF history,
@@ -1505,9 +1514,9 @@ function renderPriceChart() {
     .sort((a, b) => Math.abs(rowPrice(a) - target) - Math.abs(rowPrice(b) - target));
   if (familyHistoryItems.length) {
     const proxy = familyHistoryItems[0];
-    const proxySeries = priceHistory[goodsIdOf(proxy)];
+    const proxyPair = seriesPair(goodsIdOf(proxy));
     if (priceChartTitle) priceChartTitle.textContent = `${proxy.skin_name || proxy.item_name} — BUFF price history`;
-    renderTimeSeries(host, proxySeries);
+    renderTimeSeries(host, proxyPair);
     if (priceChartMeta) {
       const note = `Showing closest ${selectedRow.family} item with BUFF history (${proxy.skin_name || proxy.item_name}). Real history for "${selectedRow.skin_name || selectedRow.item_name}" not yet fetched.`;
       const existing = priceChartMeta.innerHTML;
@@ -1522,9 +1531,9 @@ function renderPriceChart() {
     .sort((a, b) => Math.abs(rowPrice(a) - target) - Math.abs(rowPrice(b) - target));
   if (anyHistoryItems.length) {
     const proxy = anyHistoryItems[0];
-    const proxySeries = priceHistory[goodsIdOf(proxy)];
+    const proxyPair = seriesPair(goodsIdOf(proxy));
     if (priceChartTitle) priceChartTitle.textContent = `${proxy.skin_name || proxy.item_name} — BUFF price history (proxy)`;
-    renderTimeSeries(host, proxySeries);
+    renderTimeSeries(host, proxyPair);
     if (priceChartMeta) {
       priceChartMeta.innerHTML += `<span class="muted" style="display:block;margin-top:4px;font-size:11.5px">No BUFF history yet for ${escapeHtml(selectedRow.skin_name || selectedRow.item_name)}. Showing closest-price item with data: ${escapeHtml(proxy.skin_name)}.</span>`;
     }
@@ -1535,18 +1544,28 @@ function renderPriceChart() {
   if (priceChartMeta) priceChartMeta.textContent = "";
   host.innerHTML = `<div class="empty-state"><div><strong>BUFF price history not yet fetched.</strong><p>Current price: ${money(rowPrice(selectedRow||{}))}. Real time-series appears once the scheduled Lambda fetches BUFF history with a valid cookie.</p></div></div>`;
 }
-function renderTimeSeries(host, fullSeries) {
+function _filterRange(arr) {
   const cutoff = Date.now() - rangeDays * 86400000;
-  let series = fullSeries.filter(p => p[0] >= cutoff);
-  if (series.length < 2) series = fullSeries.slice(-Math.max(2, Math.min(fullSeries.length, rangeDays)));
+  let s = arr.filter(p => p[0] >= cutoff);
+  if (s.length < 2) s = arr.slice(-Math.max(2, Math.min(arr.length, rangeDays)));
+  return s;
+}
+function renderTimeSeries(host, pair) {
+  // Back-compat: accept either {listing,buy_order} or a bare array.
+  if (Array.isArray(pair)) pair = { listing: pair, buy_order: [] };
+  const series = _filterRange(pair.listing || []);
+  const buy = _filterRange(pair.buy_order || []);
   const w = 900, h = 280, padL = 60, padR = 16, padT = 16, padB = 26;
-  const xs = series.map(p => p[0]), ys = series.map(p => p[1]);
+  // X domain spans both series so they share the same axis.
+  const xs = series.map(p => p[0]).concat(buy.map(p => p[0]));
+  const ys = series.map(p => p[1]).concat(buy.map(p => p[1]));
   const minX = Math.min(...xs), maxX = Math.max(...xs);
   const minY = Math.min(...ys), maxY = Math.max(...ys);
   const X = t => padL + ((t - minX) / Math.max(maxX - minX, 1)) * (w - padL - padR);
   const Y = v => h - padB - ((v - minY) / Math.max(maxY - minY, 1)) * (h - padT - padB);
   const linePts = series.map(p => `${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(" ");
   const areaPts = `${padL},${h-padB} ${linePts} ${(w-padR)},${h-padB}`;
+  const buyPts = buy.length ? buy.map(p => `${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(" ") : "";
   // horizontal gridlines + y labels (4 ticks)
   let grid = "";
   for (let i = 0; i <= 4; i++) {
@@ -1561,8 +1580,19 @@ function renderTimeSeries(host, fullSeries) {
     const p = series[idx];
     xlabels += `<text class="ph-axis" text-anchor="middle" x="${X(p[0])}" y="${h-8}">${_fmtDate(p[0])}</text>`;
   });
+  // BUFF buff_price_type=1 returns transaction events (individual sales) —
+  // spiky pattern matching the yellow line on BUFF's own price-chart UI.
+  const buyLine = buyPts
+    ? `<polyline points="${buyPts}" fill="none" stroke="#facc15" stroke-width="1.5" opacity="0.85"></polyline>`
+    : "";
+  const legend = `
+    <div style="position:absolute;top:6px;right:10px;display:flex;gap:14px;font-size:12px;color:var(--muted);background:rgba(7,10,16,.6);padding:4px 10px;border-radius:8px;border:1px solid var(--line)">
+      <span style="display:inline-flex;align-items:center;gap:5px"><span style="width:14px;height:2px;background:linear-gradient(90deg,#f5b342,#ff7a1a)"></span>Listing price</span>
+      ${buyPts ? '<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:14px;height:2px;background:#facc15"></span>Transactions</span>' : ""}
+    </div>`;
   host.innerHTML = `
     <div style="position:relative;width:100%;height:100%">
+      ${legend}
       <svg class="ph-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="Price history">
         <defs>
           <linearGradient id="phLine" x1="0" x2="1"><stop stop-color="#f5b342"/><stop offset="1" stop-color="#ff7a1a"/></linearGradient>
@@ -1570,6 +1600,7 @@ function renderTimeSeries(host, fullSeries) {
         </defs>
         ${grid}
         <polygon class="ph-area" points="${areaPts}"></polygon>
+        ${buyLine}
         <polyline class="ph-line" points="${linePts}"></polyline>
         <line class="ph-crosshair" id="phCross" y1="${padT}" y2="${h-padB}"></line>
         <circle class="ph-dot" id="phDot" r="3.5"></circle>
@@ -1587,19 +1618,26 @@ function renderTimeSeries(host, fullSeries) {
   const tip = host.querySelector("#phTip");
   const cross = host.querySelector("#phCross");
   const dot = host.querySelector("#phDot");
+  function _nearest(arr, px) {
+    let best = arr[0], bestd = Infinity;
+    for (const p of arr) { const d = Math.abs(X(p[0]) - px); if (d < bestd) { bestd = d; best = p; } }
+    return best;
+  }
   function onMove(ev) {
     const rect = svg.getBoundingClientRect();
     const px = (ev.clientX - rect.left) / rect.width * w;
-    // nearest point by x
-    let best = series[0], bestd = Infinity;
-    for (const p of series) { const d = Math.abs(X(p[0]) - px); if (d < bestd) { bestd = d; best = p; } }
-    const cx = X(best[0]), cy = Y(best[1]);
+    const listingBest = _nearest(series, px);
+    const buyBest = buy.length ? _nearest(buy, px) : null;
+    const cx = X(listingBest[0]), cy = Y(listingBest[1]);
     cross.setAttribute("x1", cx); cross.setAttribute("x2", cx); cross.style.opacity = 1;
     dot.setAttribute("cx", cx); dot.setAttribute("cy", cy); dot.style.opacity = 1;
     tip.style.opacity = 1;
     tip.style.left = (cx / w * rect.width) + "px";
     tip.style.top = (cy / h * rect.height) + "px";
-    tip.innerHTML = `<b>${money(best[1])}</b><br>${_fmtDate(best[0])}`;
+    const buyLineHtml = buyBest
+      ? `<br><span style="color:#facc15">Transaction ${money(buyBest[1])}</span>`
+      : "";
+    tip.innerHTML = `<b>Listing ${money(listingBest[1])}</b>${buyLineHtml}<br><span class="muted">${_fmtDate(listingBest[0])}</span>`;
   }
   function onLeave() { cross.style.opacity = 0; dot.style.opacity = 0; tip.style.opacity = 0; }
   svg.addEventListener("mousemove", onMove);

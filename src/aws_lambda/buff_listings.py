@@ -122,13 +122,15 @@ def fetch_price_history(
     goods_id: int,
     *,
     days: int = 365,
-    usd_to_cny: float = 1.0,
+    buff_price_type: int = 2,
     timeout: int = 15,
 ) -> list[list[float]]:
     """Return [[epoch_ms, price_cny], ...] for one goods_id, or [] on failure.
 
-    BUFF's price_history endpoint returns prices already in the requested
-    currency (CNY here), so usd_to_cny defaults to 1. Never raises.
+    ``buff_price_type`` matches BUFF's own UI toggle:
+      1 = buy order price (purple line on BUFF's chart)
+      2 = listing (sell) price (blue line — the default we used before)
+    Never raises.
     """
     params = urllib.parse.urlencode(
         {
@@ -136,7 +138,7 @@ def fetch_price_history(
             "goods_id": goods_id,
             "currency": "CNY",
             "days": days,
-            "buff_price_type": 2,
+            "buff_price_type": buff_price_type,
         }
     )
     try:
@@ -150,7 +152,7 @@ def fetch_price_history(
     for entry in raw:
         try:
             ts = float(entry[0])
-            price = float(entry[1]) * usd_to_cny
+            price = float(entry[1])
         except (TypeError, ValueError, IndexError):
             continue
         points.append([round(ts), round(price, 2)])
@@ -165,19 +167,25 @@ def build_price_history(
     sleep_seconds: float = 0.8,
     timeout: int = 15,
     max_consecutive_empty: int = 5,
-) -> dict[str, list[list[float]]]:
-    """Fetch price history for several goods_ids. Keyed by str(goods_id).
+) -> dict[str, dict[str, list[list[float]]]]:
+    """Fetch listing + buy-order price history for several goods_ids.
 
-    Bails out early after ``max_consecutive_empty`` consecutive empty results,
-    which is the signal that BUFF is rate-limiting us. Stops eating Lambda
-    time on requests that aren't going to return data anyway.
+    Returns ``{str(goods_id): {"listing": [...], "buy_order": [...]}}``.
+    Bails out early after ``max_consecutive_empty`` consecutive items with no
+    data on the primary series (BUFF rate-limit signal).
     """
-    out: dict[str, list[list[float]]] = {}
+    out: dict[str, dict[str, list[list[float]]]] = {}
     empty_streak = 0
     for i, gid in enumerate(goods_ids):
-        pts = fetch_price_history(cookie, gid, days=days, timeout=timeout)
-        if pts:
-            out[str(gid)] = pts
+        listing = fetch_price_history(cookie, gid, days=days, buff_price_type=2, timeout=timeout)
+        buy_order: list[list[float]] = []
+        if listing:
+            # Only spend the second call when the first one returned data.
+            time.sleep(min(sleep_seconds, 0.5))
+            buy_order = fetch_price_history(
+                cookie, gid, days=days, buff_price_type=1, timeout=timeout
+            )
+            out[str(gid)] = {"listing": listing, "buy_order": buy_order}
             empty_streak = 0
         else:
             empty_streak += 1

@@ -175,6 +175,28 @@ def test_buff_enrich_rows_matches_by_normalized_name():
     assert rows[1]["listing_count"] is None  # no match -> stays unknown
 
 
+def test_buff_build_price_history_returns_dual_series():
+    from src.aws_lambda import buff_listings
+
+    listing_payload = {"code": "OK", "data": {"price_history": [[1700000000000, 100], [1700086400000, 110]]}}
+    buy_payload = {"code": "OK", "data": {"price_history": [[1700000000000, 90], [1700086400000, 95]]}}
+    calls = []
+
+    def fake_get(url, cookie, timeout):
+        calls.append(url)
+        return buy_payload if "buff_price_type=1" in url else listing_payload
+
+    with patch.object(buff_listings, "_get_json", side_effect=fake_get), \
+         patch.object(buff_listings.time, "sleep", lambda *_a: None):
+        out = buff_listings.build_price_history("session=x", [42587], days=90)
+
+    assert "42587" in out
+    assert out["42587"]["listing"] == [[1700000000000, 100], [1700086400000, 110]]
+    assert out["42587"]["buy_order"] == [[1700000000000, 90], [1700086400000, 95]]
+    assert any("buff_price_type=2" in u for u in calls)
+    assert any("buff_price_type=1" in u for u in calls)
+
+
 def test_buff_fetch_listing_map_parses_payload():
     from src.aws_lambda import buff_listings
 
