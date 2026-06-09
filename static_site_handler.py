@@ -956,6 +956,28 @@ def _render_html(updated_at: str, rows: list[dict[str, Any]]) -> str:
       font-variant-numeric: tabular-nums;
     }
     .ph-tip b { color: var(--gold); }
+    .mobile-cards { display: none; grid-template-columns: 1fr; gap: 10px; }
+    .mc-card {
+      display: grid; grid-template-columns: 60px 1fr auto; gap: 10px;
+      align-items: center; padding: 10px;
+      border: 1px solid var(--line); border-radius: 12px;
+      background: rgba(7,10,16,.55); cursor: pointer;
+    }
+    .mc-card:hover, .mc-card.selected-row { border-color: var(--gold); }
+    .mc-card img { width: 60px; height: 44px; object-fit: contain; }
+    .mc-card .mc-body { min-width: 0; }
+    .mc-card .mc-name { font-weight: 700; font-size: 13.5px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+    .mc-card .mc-meta { font-size: 11.5px; color: var(--muted); margin-top: 2px; font-variant-numeric: tabular-nums; }
+    .mc-card .mc-price { text-align: right; }
+    .mc-card .mc-price strong { display: block; font-size: 14px; font-variant-numeric: tabular-nums; }
+    .mc-card .mc-price span { font-size: 11px; }
+    @media (max-width: 768px) {
+      .table-shell { display: none; }
+      .mobile-cards { display: grid; }
+      .table-tools { grid-template-columns: 1fr 1fr; }
+      .table-tools input { grid-column: span 2; }
+      .table-tools .reset-btn { grid-column: span 2; }
+    }
     .table-actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 16px; color: var(--muted); font-size: 12px; }
     .load-more {
       min-height: 38px;
@@ -1166,6 +1188,7 @@ def _render_html(updated_at: str, rows: list[dict[str, Any]]) -> str:
         <tbody id="rows">__INITIAL_TABLE_ROWS__</tbody>
       </table>
     </div>
+    <div class="mobile-cards" id="mobileCards"></div>
     <div class="table-actions">
       <span id="tableNote">Showing matching rows.</span>
       <button class="load-more" id="loadMore" type="button">Load more</button>
@@ -1417,6 +1440,27 @@ function renderTable() {
   tableCount.textContent = `${filtered.length.toLocaleString()} rows`;
   tableNote.textContent = `Showing ${visible.length.toLocaleString()} of ${filtered.length.toLocaleString()} matching knife rows.`;
   loadMore.hidden = visible.length >= filtered.length;
+  // Mobile cards (mirror of the table for narrow viewports).
+  const mc = document.getElementById("mobileCards");
+  if (mc) {
+    mc.innerHTML = visible.map(row => {
+      const sel = selectedRow && row.goods_id === selectedRow.goods_id;
+      return `<div class="mc-card ${sel ? "selected-row" : ""}" data-id="${escapeHtml(row.goods_id)}">
+        <img src="${escapeHtml(imageForRow(row) || FALLBACK_IMG)}" alt="" loading="lazy" onerror="imgFallback(this)">
+        <div class="mc-body">
+          <div class="mc-name">${escapeHtml(row.item_name || row.skin_name)}</div>
+          <div class="mc-meta">${escapeHtml(row.wear || row.condition)} &middot; ${escapeHtml(row.knife_type || "")}${listingValue(row) !== null ? " &middot; Sell " + listingText(row) : ""}</div>
+        </div>
+        <div class="mc-price"><strong>${money(row.price ?? row.price_cny)}</strong><span>${spreadText(row)}</span></div>
+      </div>`;
+    }).join("");
+    mc.querySelectorAll(".mc-card").forEach(el => {
+      el.addEventListener("click", () => {
+        const m = rows.find(r => r.goods_id === el.dataset.id);
+        if (m) selectRow(m);
+      });
+    });
+  }
   tbody.innerHTML = visible.map(row => {
     const isSelected = selectedRow && row.goods_id === selectedRow.goods_id;
     return `<tr data-id="${escapeHtml(row.goods_id)}" class="${isSelected ? "selected-row" : ""}"><td><div class="skin-cell"><img class="skin-thumb" src="${escapeHtml(imageForRow(row) || FALLBACK_IMG)}" alt="" loading="lazy" onerror="imgFallback(this)"><div><strong>${escapeHtml(row.item_name || row.skin_name)}</strong><small>${escapeHtml(row.knife_type || "Unknown")} &middot; ${escapeHtml(row.condition || "N/A")}</small></div></div></td><td><span class="pill">${escapeHtml(row.wear || row.condition || "N/A")}</span></td><td class="right">${money(row.price ?? row.price_cny)}</td><td class="right">${money(row.reference_price_cny)}</td><td>${spreadText(row)}</td><td class="right">${listingText(row)}</td><td>${escapeHtml(row.source)}</td></tr>`;
@@ -1763,6 +1807,35 @@ render();
     return template
 
 
+def _alert_cookie_expired(ssm_client: Any, fetch_errors: list[str]) -> None:
+    """One-shot Discord ping when the BUFF cookie has stopped working."""
+    import os  # noqa: PLC0415
+
+    webhook_param = os.getenv("DISCORD_WEBHOOK_SSM_PARAM", "").strip()
+    if not webhook_param:
+        print(f"buff_cookie_expired errors={fetch_errors}", flush=True)
+        return
+    try:
+        out = ssm_client.get_parameter(Name=webhook_param, WithDecryption=True)
+        webhook = str((out.get("Parameter") or {}).get("Value") or "")
+    except Exception:  # noqa: BLE001 - best effort
+        return
+    if not webhook:
+        return
+    from src.aws_lambda.alerts import send_discord_alert  # noqa: PLC0415
+
+    send_discord_alert(
+        webhook,
+        "cookie_expired",
+        {
+            "timestamp": __import__("datetime").datetime.now(__import__("datetime").UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "items_scraped": 0,
+            "items_saved": 0,
+            "errors": ["BUFF cookie in SSM rejected — Sell(N) and price history are stale until rotated."] + fetch_errors[:2],
+        },
+    )
+
+
 def _enrich_listings(
     ssm_client: Any,
     rows: list[dict[str, Any]],
@@ -1802,14 +1875,20 @@ def _enrich_listings(
         pages = int(os.getenv("LISTING_PAGES", "4"))
         listing_map, fetch_errors = fetch_listing_map(cookie, pages=pages)
         errors.extend(fetch_errors)
+        cookie_expired = any(
+            "Login Required" in e or "Forbidden" in e or "401" in e
+            for e in fetch_errors
+        )
         if not listing_map:
+            if cookie_expired or fetch_errors:
+                _alert_cookie_expired(ssm_client, fetch_errors)
             return
         count = enrich_rows(rows, listing_map)
         print(f"listings_enriched={count} listing_map_size={len(listing_map)}", flush=True)
 
         # Price history for the top enriched items (those with a buff goods_id).
         if s3_client and bucket:
-            history_n = int(os.getenv("LISTING_HISTORY_N", "25"))
+            history_n = int(os.getenv("LISTING_HISTORY_N", "50"))
             history_days = int(os.getenv("HISTORY_DAYS", "180"))
             enriched = [r for r in rows if r.get("buff_url") and r.get("listing_count") is not None]
             enriched.sort(key=lambda r: (r.get("price_cny") or 0), reverse=True)
