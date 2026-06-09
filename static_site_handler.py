@@ -1495,22 +1495,45 @@ function renderPriceChart() {
     renderTimeSeries(host, series);
     return;
   }
-  // Fallback: family price distribution (no per-item history available).
-  if (priceChartTitle) priceChartTitle.textContent = "Selected family price spread";
-  const pool = selectedFamilyRows();
-  const sample = [...pool].sort((a,b) => rowPrice(b) - rowPrice(a)).slice(0, 80).reverse();
-  if (priceChartMeta) priceChartMeta.textContent = gid ? "No BUFF history yet for this item (set cookie + run)." : "Per-item history needs a BUFF goods id (cookie run).";
-  if (sample.length < 2) {
-    host.innerHTML = `<div class="empty-state"><div><strong>${escapeHtml(selectedRow ? (selectedRow.skin_name||selectedRow.item_name) : "Selected item")}</strong><p>Price: ${money(rowPrice(selectedRow||{}))}. A time-series chart appears here once BUFF price history is fetched for this item.</p></div></div>`;
+  // Fallback: pick nearest item in the same family that DOES have BUFF history,
+  // by absolute price distance. Renders that real time-series instead of an
+  // empty placeholder so the chart panel is always populated when any data
+  // for the family exists.
+  const target = rowPrice(selectedRow);
+  const familyHistoryItems = rows
+    .filter(r => r.family === selectedRow.family && goodsIdOf(r) && priceHistory[goodsIdOf(r)])
+    .sort((a, b) => Math.abs(rowPrice(a) - target) - Math.abs(rowPrice(b) - target));
+  if (familyHistoryItems.length) {
+    const proxy = familyHistoryItems[0];
+    const proxySeries = priceHistory[goodsIdOf(proxy)];
+    if (priceChartTitle) priceChartTitle.textContent = `${proxy.skin_name || proxy.item_name} — BUFF price history`;
+    renderTimeSeries(host, proxySeries);
+    if (priceChartMeta) {
+      const note = `Showing closest ${selectedRow.family} item with BUFF history (${proxy.skin_name || proxy.item_name}). Real history for "${selectedRow.skin_name || selectedRow.item_name}" not yet fetched.`;
+      const existing = priceChartMeta.innerHTML;
+      priceChartMeta.innerHTML = existing + `<span class="muted" style="display:block;margin-top:4px;font-size:11.5px">${escapeHtml(note)}</span>`;
+    }
     return;
   }
-  const w = 900, h = 280, pad = 34;
-  const min = Math.min(...sample.map(rowPrice));
-  const max = Math.max(...sample.map(rowPrice));
-  const x = i => pad + (i / Math.max(sample.length - 1, 1)) * (w - pad * 2);
-  const y = v => h - pad - ((v - min) / Math.max(max - min, 1)) * (h - pad * 2);
-  const pts = sample.map((r, i) => `${x(i)},${y(rowPrice(r))}`).join(" ");
-  host.innerHTML = `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Family price spread"><polyline class="area" points="${pad},${h-pad} ${pts} ${w-pad},${h-pad}"></polyline><polyline class="line" points="${pts}"></polyline><text class="axis" x="${pad}" y="22">High ${money(max)}</text><text class="axis" x="${pad}" y="${h-8}">Low ${money(min)}</text></svg>`;
+  // No family proxy. Last resort: show ANY available BUFF series so the panel
+  // is never empty. Pick by closest price across all rows with history.
+  const anyHistoryItems = rows
+    .filter(r => goodsIdOf(r) && priceHistory[goodsIdOf(r)])
+    .sort((a, b) => Math.abs(rowPrice(a) - target) - Math.abs(rowPrice(b) - target));
+  if (anyHistoryItems.length) {
+    const proxy = anyHistoryItems[0];
+    const proxySeries = priceHistory[goodsIdOf(proxy)];
+    if (priceChartTitle) priceChartTitle.textContent = `${proxy.skin_name || proxy.item_name} — BUFF price history (proxy)`;
+    renderTimeSeries(host, proxySeries);
+    if (priceChartMeta) {
+      priceChartMeta.innerHTML += `<span class="muted" style="display:block;margin-top:4px;font-size:11.5px">No BUFF history yet for ${escapeHtml(selectedRow.skin_name || selectedRow.item_name)}. Showing closest-price item with data: ${escapeHtml(proxy.skin_name)}.</span>`;
+    }
+    return;
+  }
+  // True empty state — no history fetched at all.
+  if (priceChartTitle) priceChartTitle.textContent = `${selectedRow.skin_name || selectedRow.item_name} — price history pending`;
+  if (priceChartMeta) priceChartMeta.textContent = "";
+  host.innerHTML = `<div class="empty-state"><div><strong>BUFF price history not yet fetched.</strong><p>Current price: ${money(rowPrice(selectedRow||{}))}. Real time-series appears once the scheduled Lambda fetches BUFF history with a valid cookie.</p></div></div>`;
 }
 function renderTimeSeries(host, fullSeries) {
   const cutoff = Date.now() - rangeDays * 86400000;
