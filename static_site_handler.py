@@ -937,6 +937,25 @@ def _render_html(updated_at: str, rows: list[dict[str, Any]]) -> str:
     .wl-bar > i { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--gold), var(--orange)); }
     .wl-row .wl-price { font-variant-numeric: tabular-nums; font-size: 12.5px; }
     .wl-row.missing .wl-price { color: var(--muted); }
+    .range-toggle { display: inline-flex; gap: 4px; background: rgba(7,10,16,.6); border: 1px solid var(--line); border-radius: 10px; padding: 3px; }
+    .range-toggle button { min-height: 30px; padding: 4px 12px; border-radius: 8px; border: none; background: transparent; color: var(--muted); font-size: 12.5px; font-weight: 600; }
+    .range-toggle button.active { background: linear-gradient(135deg, var(--gold), var(--orange)); color: #1a1004; }
+    .chart-meta { display: flex; justify-content: space-between; gap: 12px; margin-top: 8px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+    .ph-svg { width: 100%; height: 100%; display: block; }
+    .ph-area { fill: url(#phArea); }
+    .ph-line { fill: none; stroke: url(#phLine); stroke-width: 2; }
+    .ph-grid { stroke: rgba(255,255,255,.06); stroke-width: 1; }
+    .ph-axis { fill: var(--muted); font-size: 11px; }
+    .ph-crosshair { stroke: var(--gold); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0; }
+    .ph-dot { fill: var(--gold); opacity: 0; }
+    .ph-tip {
+      position: absolute; pointer-events: none; opacity: 0;
+      background: rgba(7,10,16,.95); border: 1px solid var(--line-strong);
+      border-radius: 8px; padding: 6px 10px; font-size: 12px; color: var(--text);
+      transform: translate(-50%, -120%); white-space: nowrap; z-index: 5;
+      font-variant-numeric: tabular-nums;
+    }
+    .ph-tip b { color: var(--gold); }
     .table-actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 16px; color: var(--muted); font-size: 12px; }
     .load-more {
       min-height: 38px;
@@ -1076,8 +1095,17 @@ def _render_html(updated_at: str, rows: list[dict[str, Any]]) -> str:
   </section>
 
   <section class="panel" style="margin-top:16px">
-    <div class="panel-title"><div><span class="panel-kicker">Price history</span><h2>Selected family price curve</h2></div><span class="badge" id="priceChartBadge">Same family</span></div>
+    <div class="panel-title">
+      <div><span class="panel-kicker">Price history</span><h2 id="priceChartTitle">Selected item price history</h2></div>
+      <div class="range-toggle" id="rangeToggle">
+        <button type="button" data-days="7">7D</button>
+        <button type="button" data-days="30">30D</button>
+        <button type="button" data-days="90" class="active">90D</button>
+        <button type="button" data-days="365">1Y</button>
+      </div>
+    </div>
     <div id="priceChart" class="chart-wrap"></div>
+    <div class="chart-meta" id="priceChartMeta"></div>
   </section>
 
   <section class="panel" style="margin-top:16px">
@@ -1172,7 +1200,6 @@ function imgFallback(el) { el.onerror = null; el.src = FALLBACK_IMG; }
 const detailBuffLink = document.getElementById("detailBuffLink");
 const relatedItems = document.getElementById("relatedItems");
 const relatedCount = document.getElementById("relatedCount");
-const priceChartBadge = document.getElementById("priceChartBadge");
 const imageByKnife = Object.fromEntries(knifeTypes.map(item => [item.name, item.image_url]));
 const wearLadder = document.getElementById("wearLadder");
 const familyBrowser = document.getElementById("familyBrowser");
@@ -1180,10 +1207,31 @@ const familyBrowserTitle = document.getElementById("familyBrowserTitle");
 const familyBrowserCount = document.getElementById("familyBrowserCount");
 const skinGrid = document.getElementById("skinGrid");
 const skinSearch = document.getElementById("skinSearch");
+const priceChartTitle = document.getElementById("priceChartTitle");
+const priceChartMeta = document.getElementById("priceChartMeta");
+const rangeToggle = document.getElementById("rangeToggle");
 let tableLimit = 300;
 let selectedRow = [...rows].sort((a,b) => rowPrice(b) - rowPrice(a))[0] || rows[0] || null;
 let selectedFamily = "";
+let rangeDays = 90;
+let priceHistory = {};
 const wearOrder = ["FN", "MW", "FT", "WW", "BS"];
+function goodsIdOf(row) {
+  const u = row && row.buff_url;
+  if (!u) return null;
+  const i = String(u).indexOf("/goods/");
+  if (i < 0) return null;
+  let out = "";
+  for (const ch of String(u).slice(i + 7)) {
+    if (ch >= "0" && ch <= "9") out += ch; else break;
+  }
+  return out || null;
+}
+// Load real BUFF price history (written by the cookie-enabled Lambda run).
+fetch("current/price_history.json", {cache: "no-store"})
+  .then(r => r.ok ? r.json() : {})
+  .then(d => { priceHistory = d || {}; renderPriceChart(); })
+  .catch(() => {});
 function money(value) { return value == null ? "N/A" : Number(value).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) + " CNY"; }
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, char => ({
@@ -1380,29 +1428,106 @@ function renderTable() {
     });
   });
 }
+function _fmtDate(ms) {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
 function renderPriceChart() {
   const host = document.getElementById("priceChart");
+  if (!host) return;
+  const gid = goodsIdOf(selectedRow);
+  const series = gid && priceHistory[gid] ? priceHistory[gid] : null;
+  if (series && series.length >= 2) {
+    if (priceChartTitle) priceChartTitle.textContent = `${selectedRow.skin_name || selectedRow.item_name} — BUFF price history`;
+    renderTimeSeries(host, series);
+    return;
+  }
+  // Fallback: family price distribution (no per-item history available).
+  if (priceChartTitle) priceChartTitle.textContent = "Selected family price spread";
   const pool = selectedFamilyRows();
   const sample = [...pool].sort((a,b) => rowPrice(b) - rowPrice(a)).slice(0, 80).reverse();
-  priceChartBadge.textContent = selectedRow ? `${selectedRow.family || selectedRow.category} / ${selectedRow.wear || selectedRow.condition}` : "Selected item";
-  if (!sample.length) { host.innerHTML = `<div class="empty-state"><div><strong>No price data yet</strong><p>Run the scheduled scraper to populate the market curve.</p></div></div>`; return; }
-  if (sample.length === 1) {
-    const item = sample[0];
-    host.innerHTML = `<div class="empty-state"><div><strong>${escapeHtml(item.item_name || item.skin_name || "Selected item")}</strong><p>Selected wear price: ${money(rowPrice(item))}. More wear points will appear here when the static feed includes additional variants for this skin family.</p></div></div>`;
+  if (priceChartMeta) priceChartMeta.textContent = gid ? "No BUFF history yet for this item (set cookie + run)." : "Per-item history needs a BUFF goods id (cookie run).";
+  if (sample.length < 2) {
+    host.innerHTML = `<div class="empty-state"><div><strong>${escapeHtml(selectedRow ? (selectedRow.skin_name||selectedRow.item_name) : "Selected item")}</strong><p>Price: ${money(rowPrice(selectedRow||{}))}. A time-series chart appears here once BUFF price history is fetched for this item.</p></div></div>`;
     return;
   }
   const w = 900, h = 280, pad = 34;
-  const min = Math.min(...sample.map(row => rowPrice(row)));
-  const max = Math.max(...sample.map(row => rowPrice(row)));
+  const min = Math.min(...sample.map(rowPrice));
+  const max = Math.max(...sample.map(rowPrice));
   const x = i => pad + (i / Math.max(sample.length - 1, 1)) * (w - pad * 2);
-  const y = value => h - pad - ((value - min) / Math.max(max - min, 1)) * (h - pad * 2);
-  const points = sample.map((row, i) => `${x(i)},${y(rowPrice(row))}`).join(" ");
-  const area = `${pad},${h-pad} ${points} ${w-pad},${h-pad}`;
-  host.innerHTML = `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Price curve">
-    <defs><linearGradient id="priceGradient" x1="0" x2="1"><stop stop-color="#f5b342"/><stop offset="1" stop-color="#ff7a1a"/></linearGradient><linearGradient id="areaGradient" x1="0" x2="0" y1="0" y2="1"><stop stop-color="#f5b342" stop-opacity=".34"/><stop offset="1" stop-color="#f5b342" stop-opacity="0"/></linearGradient></defs>
-    <polyline class="area" points="${area}"></polyline><polyline class="line" points="${points}"></polyline>
-    <text class="axis" x="${pad}" y="22">High ${money(max)}</text><text class="axis" x="${pad}" y="${h-8}">Low ${money(min)}</text>
-  </svg>`;
+  const y = v => h - pad - ((v - min) / Math.max(max - min, 1)) * (h - pad * 2);
+  const pts = sample.map((r, i) => `${x(i)},${y(rowPrice(r))}`).join(" ");
+  host.innerHTML = `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Family price spread"><polyline class="area" points="${pad},${h-pad} ${pts} ${w-pad},${h-pad}"></polyline><polyline class="line" points="${pts}"></polyline><text class="axis" x="${pad}" y="22">High ${money(max)}</text><text class="axis" x="${pad}" y="${h-8}">Low ${money(min)}</text></svg>`;
+}
+function renderTimeSeries(host, fullSeries) {
+  const cutoff = Date.now() - rangeDays * 86400000;
+  let series = fullSeries.filter(p => p[0] >= cutoff);
+  if (series.length < 2) series = fullSeries.slice(-Math.max(2, Math.min(fullSeries.length, rangeDays)));
+  const w = 900, h = 280, padL = 60, padR = 16, padT = 16, padB = 26;
+  const xs = series.map(p => p[0]), ys = series.map(p => p[1]);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const X = t => padL + ((t - minX) / Math.max(maxX - minX, 1)) * (w - padL - padR);
+  const Y = v => h - padB - ((v - minY) / Math.max(maxY - minY, 1)) * (h - padT - padB);
+  const linePts = series.map(p => `${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(" ");
+  const areaPts = `${padL},${h-padB} ${linePts} ${(w-padR)},${h-padB}`;
+  // horizontal gridlines + y labels (4 ticks)
+  let grid = "";
+  for (let i = 0; i <= 4; i++) {
+    const val = minY + (maxY - minY) * (i / 4);
+    const yy = Y(val);
+    grid += `<line class="ph-grid" x1="${padL}" y1="${yy}" x2="${w-padR}" y2="${yy}"></line>`;
+    grid += `<text class="ph-axis" x="8" y="${yy+4}">${Math.round(val).toLocaleString()}</text>`;
+  }
+  // x date labels (start / mid / end)
+  let xlabels = "";
+  [0, Math.floor(series.length/2), series.length-1].forEach(idx => {
+    const p = series[idx];
+    xlabels += `<text class="ph-axis" text-anchor="middle" x="${X(p[0])}" y="${h-8}">${_fmtDate(p[0])}</text>`;
+  });
+  host.innerHTML = `
+    <div style="position:relative;width:100%;height:100%">
+      <svg class="ph-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="Price history">
+        <defs>
+          <linearGradient id="phLine" x1="0" x2="1"><stop stop-color="#f5b342"/><stop offset="1" stop-color="#ff7a1a"/></linearGradient>
+          <linearGradient id="phArea" x1="0" x2="0" y1="0" y2="1"><stop stop-color="#f5b342" stop-opacity=".30"/><stop offset="1" stop-color="#f5b342" stop-opacity="0"/></linearGradient>
+        </defs>
+        ${grid}
+        <polygon class="ph-area" points="${areaPts}"></polygon>
+        <polyline class="ph-line" points="${linePts}"></polyline>
+        <line class="ph-crosshair" id="phCross" y1="${padT}" y2="${h-padB}"></line>
+        <circle class="ph-dot" id="phDot" r="3.5"></circle>
+        ${xlabels}
+      </svg>
+      <div class="ph-tip" id="phTip"></div>
+    </div>`;
+  if (priceChartMeta) {
+    const first = series[0], last = series[series.length-1];
+    const chg = first[1] ? ((last[1]-first[1])/first[1]*100) : 0;
+    priceChartMeta.innerHTML = `<span>${_fmtDate(minX)} → ${_fmtDate(maxX)} &middot; ${series.length} points</span><span>Range ${money(minY)} – ${money(maxY)} &middot; <b style="color:${chg>=0?'var(--green)':'var(--red)'}">${chg>=0?'+':''}${chg.toFixed(1)}%</b></span>`;
+  }
+  // hover tooltip
+  const svg = host.querySelector(".ph-svg");
+  const tip = host.querySelector("#phTip");
+  const cross = host.querySelector("#phCross");
+  const dot = host.querySelector("#phDot");
+  function onMove(ev) {
+    const rect = svg.getBoundingClientRect();
+    const px = (ev.clientX - rect.left) / rect.width * w;
+    // nearest point by x
+    let best = series[0], bestd = Infinity;
+    for (const p of series) { const d = Math.abs(X(p[0]) - px); if (d < bestd) { bestd = d; best = p; } }
+    const cx = X(best[0]), cy = Y(best[1]);
+    cross.setAttribute("x1", cx); cross.setAttribute("x2", cx); cross.style.opacity = 1;
+    dot.setAttribute("cx", cx); dot.setAttribute("cy", cy); dot.style.opacity = 1;
+    tip.style.opacity = 1;
+    tip.style.left = (cx / w * rect.width) + "px";
+    tip.style.top = (cy / h * rect.height) + "px";
+    tip.innerHTML = `<b>${money(best[1])}</b><br>${_fmtDate(best[0])}`;
+  }
+  function onLeave() { cross.style.opacity = 0; dot.style.opacity = 0; tip.style.opacity = 0; }
+  svg.addEventListener("mousemove", onMove);
+  svg.addEventListener("mouseleave", onLeave);
 }
 function renderRelatedItems() {
   if (!selectedRow) return;
@@ -1554,6 +1679,13 @@ document.getElementById("resetFilters")?.addEventListener("click", () => {
   render();
 });
 loadMore.addEventListener("click", () => { tableLimit += 300; render(); });
+rangeToggle?.querySelectorAll("button").forEach(btn => {
+  btn.addEventListener("click", () => {
+    rangeDays = Number(btn.dataset.days) || 90;
+    rangeToggle.querySelectorAll("button").forEach(b => b.classList.toggle("active", b === btn));
+    renderPriceChart();
+  });
+});
 render();
 </script>
 </body>
@@ -1631,13 +1763,21 @@ render();
     return template
 
 
-def _enrich_listings(ssm_client: Any, rows: list[dict[str, Any]], errors: list[str]) -> None:
-    """Add real BUFF listing counts (Sell(N)) to the top-priced knives.
+def _enrich_listings(
+    ssm_client: Any,
+    rows: list[dict[str, Any]],
+    errors: list[str],
+    s3_client: Any = None,
+    bucket: str = "",
+    key_prefix: str = "",
+) -> None:
+    """Add real BUFF listing counts + price history when a cookie is configured.
 
-    Reads a BUFF session cookie from SSM (param name in BUFF_COOKIE_SSM_PARAM,
-    default ``/buff163/cookie``). No cookie -> silently skipped. Only the top
-    ``LISTING_TOP_N`` rows by price are considered, and the BUFF goods list is
-    paged by sell_num desc, so a handful of requests cover the busiest knives.
+    Reads a BUFF session cookie from SSM (BUFF_COOKIE_SSM_PARAM, default
+    ``/buff163/cookie``). No cookie -> silently skipped (dashboard stays
+    price-only). Enriches rows with Sell(N) listing counts and real buff_url,
+    then fetches BUFF price history for the top items and writes it to
+    ``current/price_history.json`` for the time-series chart.
     """
     import os  # noqa: PLC0415
 
@@ -1653,14 +1793,39 @@ def _enrich_listings(ssm_client: Any, rows: list[dict[str, Any]], errors: list[s
         return
 
     try:
-        from src.aws_lambda.buff_listings import enrich_rows, fetch_listing_map  # noqa: PLC0415
+        from src.aws_lambda.buff_listings import (  # noqa: PLC0415
+            build_price_history,
+            enrich_rows,
+            fetch_listing_map,
+        )
 
         pages = int(os.getenv("LISTING_PAGES", "4"))
         listing_map, fetch_errors = fetch_listing_map(cookie, pages=pages)
         errors.extend(fetch_errors)
-        if listing_map:
-            count = enrich_rows(rows, listing_map)
-            print(f"listings_enriched={count} listing_map_size={len(listing_map)}", flush=True)
+        if not listing_map:
+            return
+        count = enrich_rows(rows, listing_map)
+        print(f"listings_enriched={count} listing_map_size={len(listing_map)}", flush=True)
+
+        # Price history for the top enriched items (those with a buff goods_id).
+        if s3_client and bucket:
+            history_n = int(os.getenv("LISTING_HISTORY_N", "60"))
+            history_days = int(os.getenv("HISTORY_DAYS", "365"))
+            enriched = [r for r in rows if r.get("buff_url") and r.get("listing_count") is not None]
+            enriched.sort(key=lambda r: (r.get("price_cny") or 0), reverse=True)
+            goods_ids: list[int] = []
+            for r in enriched[:history_n]:
+                try:
+                    goods_ids.append(int(str(r["buff_url"]).rsplit("/", 1)[-1]))
+                except (ValueError, KeyError):
+                    continue
+            if goods_ids:
+                history = build_price_history(cookie, goods_ids, days=history_days)
+                if history:
+                    from src.aws_lambda.s3_store import put_json  # noqa: PLC0415
+
+                    put_json(s3_client, bucket, f"{key_prefix}current/price_history.json", history)
+                    print(f"price_history_items={len(history)}", flush=True)
     except Exception as exc:  # noqa: BLE001 - enrichment is best-effort
         errors.append(f"listing_enrich_failed: {type(exc).__name__}")
 
@@ -1720,7 +1885,7 @@ def lambda_handler(event: dict[str, Any] | None = None, context: Any = None) -> 
         rows = _snapshots()
         # Optional: enrich the most-listed knives with real BUFF listing counts
         # (Sell(N)) when a BUFF cookie is configured in SSM. No-op otherwise.
-        _enrich_listings(ssm, rows, errors)
+        _enrich_listings(ssm, rows, errors, s3_client=s3, bucket=bucket, key_prefix=key_prefix)
         html_body = _render_html(updated_at, rows)
         _validate_static_payload(rows, html_body)
     except Exception as exc:  # noqa: BLE001 - boundary

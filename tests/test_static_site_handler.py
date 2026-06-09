@@ -63,7 +63,8 @@ def test_static_site_handler_writes_html_and_json(monkeypatch):
     assert b"wearButtons" in html_body
     assert b"Related items" in html_body
     assert b"relatedItems" in html_body
-    assert b"Selected family price curve" in html_body
+    assert b"Selected item price history" in html_body
+    assert b"renderTimeSeries" in html_body
     assert b"selectedFamilyRows" in html_body
     assert b"selected-row" in html_body
     assert b"FALLBACK_IMG" in html_body

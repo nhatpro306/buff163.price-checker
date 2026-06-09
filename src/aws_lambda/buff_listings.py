@@ -25,6 +25,7 @@ from typing import Any
 LOG = logging.getLogger(__name__)
 
 GOODS_LIST_URL = "https://buff.163.com/api/market/goods"
+PRICE_HISTORY_URL = "https://buff.163.com/api/market/goods/price_history/buff"
 
 
 def _normalize_name(name: str) -> str:
@@ -114,6 +115,65 @@ def fetch_listing_map(
             time.sleep(sleep_seconds)
 
     return out, errors
+
+
+def fetch_price_history(
+    cookie: str,
+    goods_id: int,
+    *,
+    days: int = 365,
+    usd_to_cny: float = 1.0,
+    timeout: int = 15,
+) -> list[list[float]]:
+    """Return [[epoch_ms, price_cny], ...] for one goods_id, or [] on failure.
+
+    BUFF's price_history endpoint returns prices already in the requested
+    currency (CNY here), so usd_to_cny defaults to 1. Never raises.
+    """
+    params = urllib.parse.urlencode(
+        {
+            "game": "csgo",
+            "goods_id": goods_id,
+            "currency": "CNY",
+            "days": days,
+            "buff_price_type": 2,
+        }
+    )
+    try:
+        payload = _get_json(f"{PRICE_HISTORY_URL}?{params}", cookie, timeout)
+    except Exception:  # noqa: BLE001 - boundary
+        return []
+    if payload.get("code") != "OK":
+        return []
+    raw = ((payload.get("data") or {}).get("price_history")) or []
+    points: list[list[float]] = []
+    for entry in raw:
+        try:
+            ts = float(entry[0])
+            price = float(entry[1]) * usd_to_cny
+        except (TypeError, ValueError, IndexError):
+            continue
+        points.append([round(ts), round(price, 2)])
+    return points
+
+
+def build_price_history(
+    cookie: str,
+    goods_ids: list[int],
+    *,
+    days: int = 365,
+    sleep_seconds: float = 1.2,
+    timeout: int = 15,
+) -> dict[str, list[list[float]]]:
+    """Fetch price history for several goods_ids. Keyed by str(goods_id)."""
+    out: dict[str, list[list[float]]] = {}
+    for i, gid in enumerate(goods_ids):
+        pts = fetch_price_history(cookie, gid, days=days, timeout=timeout)
+        if pts:
+            out[str(gid)] = pts
+        if i + 1 < len(goods_ids):
+            time.sleep(sleep_seconds)
+    return out
 
 
 def enrich_rows(

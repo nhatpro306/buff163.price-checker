@@ -23,9 +23,9 @@ variable "lambda_memory_mb" {
 }
 
 variable "lambda_timeout_seconds" {
-  description = "Lambda timeout in seconds."
+  description = "Lambda timeout in seconds. Needs headroom for optional BUFF listing + price-history fetch (rate-limited)."
   type        = number
-  default     = 120
+  default     = 300
 }
 
 variable "log_retention_days" {
