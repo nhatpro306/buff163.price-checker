@@ -1130,6 +1130,15 @@ def _render_html(updated_at: str, rows: list[dict[str, Any]]) -> str:
     <div class="chart-meta" id="priceChartMeta"></div>
   </section>
 
+  <section class="panel" style="margin-top:16px" aria-label="Supply vs price">
+    <div class="panel-title">
+      <div><span class="panel-kicker">Supply vs price</span><h2>How listing count affects price</h2></div>
+      <span class="badge" id="supplyBadge">0 items</span>
+    </div>
+    <div id="supplyChart" class="chart-wrap" style="height:360px;position:relative"></div>
+    <div class="chart-meta" id="supplyMeta"></div>
+  </section>
+
   <section class="panel" style="margin-top:16px">
     <div class="panel-title"><div><span class="panel-kicker">Related items</span><h2>Same category</h2></div><span class="badge" id="relatedCount">0 items</span></div>
     <div class="related-grid" id="relatedItems"></div>
@@ -1706,7 +1715,97 @@ function renderMarketSignals() {
     });
   });
 }
-function render() { renderKnifeRail(); renderFamilyCards(); renderFamilyBrowser(); renderDetail(); renderTable(); renderPriceChart(); renderRelatedItems(); renderInsights(); renderSourceHealth(); renderMarketSignals(); }
+function renderSupplyChart() {
+  const host = document.getElementById("supplyChart");
+  const badge = document.getElementById("supplyBadge");
+  const meta = document.getElementById("supplyMeta");
+  if (!host) return;
+  const enriched = rows.filter(r => listingValue(r) !== null && listingValue(r) > 0 && rowPrice(r) > 0);
+  badge.textContent = `${enriched.length.toLocaleString()} items`;
+  if (enriched.length < 3) {
+    host.innerHTML = `<div class="empty-state"><div><strong>Not enough listing data yet</strong><p>Once BUFF Sell(N) counts are fetched for more items, this chart shows how supply relates to price across all listed knives.</p></div></div>`;
+    if (meta) meta.textContent = "";
+    return;
+  }
+  // Log-scale both axes (price + listings span orders of magnitude).
+  const w = 900, h = 340, padL = 64, padR = 18, padT = 18, padB = 36;
+  const lx = enriched.map(r => Math.log10(listingValue(r)));
+  const ly = enriched.map(r => Math.log10(rowPrice(r)));
+  const minLx = Math.min(...lx), maxLx = Math.max(...lx);
+  const minLy = Math.min(...ly), maxLy = Math.max(...ly);
+  const X = v => padL + ((Math.log10(v) - minLx) / Math.max(maxLx - minLx, 0.001)) * (w - padL - padR);
+  const Y = v => h - padB - ((Math.log10(v) - minLy) / Math.max(maxLy - minLy, 0.001)) * (h - padT - padB);
+  // OLS regression on log-log -> price elasticity vs supply.
+  const n = enriched.length;
+  const sx = lx.reduce((a,b) => a+b, 0), sy = ly.reduce((a,b) => a+b, 0);
+  const sxx = lx.reduce((a,b) => a+b*b, 0), sxy = lx.reduce((a,b,i) => a+b*ly[i], 0);
+  const slope = (n*sxy - sx*sy) / Math.max(n*sxx - sx*sx, 0.0001);
+  const intercept = (sy - slope*sx) / n;
+  const meanX = sx/n, meanY = sy/n;
+  const ssTot = ly.reduce((a,v) => a + (v-meanY)*(v-meanY), 0);
+  const ssRes = ly.reduce((a,v,i) => { const yh = slope*lx[i]+intercept; return a + (v-yh)*(v-yh); }, 0);
+  const r2 = 1 - ssRes / Math.max(ssTot, 0.0001);
+  const corr = slope >= 0 ? "positive" : "negative";
+  // Color by knife family
+  const families = [...new Set(enriched.map(r => r.knife_type))];
+  const palette = ["#f5b342","#ff7a1a","#56d89a","#79a9ff","#ff6b6b","#c084fc","#22d3ee","#f472b6","#a3e635","#fbbf24","#fb7185","#60a5fa","#34d399","#facc15","#a78bfa","#f87171","#2dd4bf","#fb923c","#94a3b8","#e879f9"];
+  const colorOf = name => palette[families.indexOf(name) % palette.length];
+  // Y gridlines at 10^k
+  let grid = "";
+  for (let pY = Math.ceil(minLy); pY <= Math.floor(maxLy); pY++) {
+    const yy = Y(Math.pow(10, pY));
+    grid += `<line class="ph-grid" x1="${padL}" y1="${yy}" x2="${w-padR}" y2="${yy}"></line>`;
+    grid += `<text class="ph-axis" x="8" y="${yy+4}">${Math.pow(10,pY).toLocaleString()}</text>`;
+  }
+  for (let pX = Math.ceil(minLx); pX <= Math.floor(maxLx); pX++) {
+    const xx = X(Math.pow(10, pX));
+    grid += `<line class="ph-grid" x1="${xx}" y1="${padT}" x2="${xx}" y2="${h-padB}"></line>`;
+    grid += `<text class="ph-axis" text-anchor="middle" x="${xx}" y="${h-12}">${Math.pow(10,pX).toLocaleString()}</text>`;
+  }
+  // Trend line
+  const x1 = minLx, x2 = maxLx;
+  const y1 = slope*x1 + intercept, y2 = slope*x2 + intercept;
+  const trendLine = `<line x1="${X(Math.pow(10,x1))}" y1="${Y(Math.pow(10,y1))}" x2="${X(Math.pow(10,x2))}" y2="${Y(Math.pow(10,y2))}" stroke="rgba(245,179,66,.5)" stroke-width="2" stroke-dasharray="6 4"></line>`;
+  // Dots
+  const dots = enriched.map((r,i) => {
+    const sel = selectedRow && r.goods_id === selectedRow.goods_id;
+    return `<circle data-id="${escapeHtml(r.goods_id)}" cx="${X(listingValue(r)).toFixed(1)}" cy="${Y(rowPrice(r)).toFixed(1)}" r="${sel ? 6.5 : 4}" fill="${colorOf(r.knife_type)}" opacity="${sel ? 1 : 0.78}" stroke="${sel ? '#fff' : 'none'}" stroke-width="${sel ? 2 : 0}" style="cursor:pointer"></circle>`;
+  }).join("");
+  host.innerHTML = `
+    <div style="position:relative;width:100%;height:100%">
+      <svg class="ph-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="Supply vs price scatter">
+        ${grid}
+        ${trendLine}
+        ${dots}
+        <text class="ph-axis" text-anchor="middle" x="${w/2}" y="${h-2}">Listings (log)</text>
+        <text class="ph-axis" transform="translate(14,${h/2}) rotate(-90)" text-anchor="middle">Price CNY (log)</text>
+      </svg>
+      <div class="ph-tip" id="supplyTip"></div>
+    </div>`;
+  // Legend in meta
+  const legendHtml = families.map(f => `<span style="display:inline-flex;align-items:center;gap:4px;margin-right:10px"><span style="width:8px;height:8px;border-radius:999px;background:${colorOf(f)}"></span>${escapeHtml(f)}</span>`).join("");
+  if (meta) meta.innerHTML = `<span><b style="color:${slope>=0?'var(--green)':'var(--red)'}">${corr} correlation</b> &middot; slope ${slope.toFixed(2)} &middot; R²=${r2.toFixed(2)}</span><span>${legendHtml}</span>`;
+  // Hover tooltip
+  const svg = host.querySelector("svg");
+  const tip = host.querySelector("#supplyTip");
+  svg.querySelectorAll("circle").forEach(c => {
+    c.addEventListener("mouseenter", () => {
+      const r = rows.find(x => x.goods_id === c.dataset.id);
+      const rect = svg.getBoundingClientRect();
+      const cx = +c.getAttribute("cx"), cy = +c.getAttribute("cy");
+      tip.style.opacity = 1;
+      tip.style.left = (cx / w * rect.width) + "px";
+      tip.style.top = (cy / h * rect.height) + "px";
+      tip.innerHTML = `<b>${escapeHtml(r.skin_name||r.item_name)}</b><br>${money(rowPrice(r))} &middot; Sell ${listingValue(r).toLocaleString()}`;
+    });
+    c.addEventListener("mouseleave", () => { tip.style.opacity = 0; });
+    c.addEventListener("click", () => {
+      const r = rows.find(x => x.goods_id === c.dataset.id);
+      if (r) selectRow(r);
+    });
+  });
+}
+function render() { renderKnifeRail(); renderFamilyCards(); renderFamilyBrowser(); renderDetail(); renderTable(); renderPriceChart(); renderSupplyChart(); renderRelatedItems(); renderInsights(); renderSourceHealth(); renderMarketSignals(); }
 skinSearch?.addEventListener("input", renderFamilyBrowser);
 search.addEventListener("input", () => { tableLimit = 300; render(); });
 knifeType.addEventListener("change", () => { tableLimit = 300; render(); });
