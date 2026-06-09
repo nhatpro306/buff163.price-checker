@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS goods (
 
 CREATE TABLE IF NOT EXISTS snapshots (
     id              BIGSERIAL PRIMARY KEY,
-    ts              TEXT        NOT NULL,
+    ts              TIMESTAMPTZ NOT NULL,
     goods_id        TEXT        NOT NULL REFERENCES goods(goods_id) ON DELETE CASCADE,
     price           DOUBLE PRECISION NOT NULL,
     listings        INTEGER     NOT NULL DEFAULT 0,

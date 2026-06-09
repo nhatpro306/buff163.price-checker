@@ -8,7 +8,7 @@ are kept out of logs.
 | Secret | Used when | Local env | Lambda (Secrets Manager) |
 |--------|-----------|-----------|--------------------------|
 | `DATABASE_URL` | `STORAGE_BACKEND=postgres` | `DATABASE_URL` | `DATABASE_URL_SECRET_ARN` |
-| `BUFF_COOKIE` | recommended (avoid 403) | `BUFF_COOKIE` | `BUFF_COOKIE_SECRET_ARN` |
+| `BUFF_COOKIE` | optional, recommended if BUFF returns 403 | `BUFF_COOKIE` | `BUFF_COOKIE_SECRET_ARN` |
 | `GSHEET_CREDS_JSON` | `STORAGE_BACKEND=sheets` | `GSHEET_CREDS_JSON` | secret ARN (future) |
 | `DISCORD_WEBHOOK_URL` | alerts (future) | `DISCORD_WEBHOOK_URL` | secret ARN (future) |
 
@@ -24,6 +24,8 @@ For any name (e.g. `DATABASE_URL`), `get_secret` resolves:
 The fetched value is written back into `os.environ` so existing code
 (`os.getenv("DATABASE_URL")` in the Postgres store) works unchanged. The Lambda
 handler calls `hydrate_secrets(("DATABASE_URL", "BUFF_COOKIE"))` before each run.
+The Streamlit dashboard hydrates `DATABASE_URL` on startup when
+`STORAGE_BACKEND=postgres`.
 
 ## Redaction (`src/redaction.py`)
 
@@ -55,7 +57,9 @@ aws secretsmanager create-secret --name buff163/BUFF_COOKIE \
 ```
 
 Then pass the resulting ARNs to Terraform (`database_url_secret_arn`,
-`buff_cookie_secret_arn`, `secret_arns`) — see `docs/aws-infra.md`.
+`buff_cookie_secret_arn`, `secret_arns`) or let Terraform create placeholder
+secrets and set their values with `aws secretsmanager put-secret-value` after
+RDS exists. See `DEPLOYMENT_AWS.md`.
 
 ## Rotation
 

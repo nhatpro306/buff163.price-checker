@@ -33,6 +33,7 @@ def test_factory_unknown_backend_falls_back_to_sheets(monkeypatch):
 def test_factory_postgres_requires_psycopg2(monkeypatch):
     monkeypatch.setenv("STORAGE_BACKEND", "postgres")
     monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/test")
+    monkeypatch.setenv("BUFF_AUTO_MIGRATE_POSTGRES", "0")
     # psycopg2 may not be installed in CI. Either it returns a PostgresStore or
     # raises ImportError with a helpful message.
     try:
@@ -46,6 +47,7 @@ def test_factory_postgres_requires_psycopg2(monkeypatch):
 
 def test_factory_postgres_missing_database_url_raises(monkeypatch):
     monkeypatch.setenv("STORAGE_BACKEND", "postgres")
+    monkeypatch.setenv("BUFF_AUTO_MIGRATE_POSTGRES", "0")
     monkeypatch.delenv("DATABASE_URL", raising=False)
     try:
         get_storage_backend()

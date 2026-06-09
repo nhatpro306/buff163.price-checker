@@ -1,6 +1,6 @@
 # BUFF163 Price Checker
 
-Track CS2 knife prices from BUFF163, store historical snapshots in Google Sheets or SQLite, and view market movement in a Streamlit dashboard.
+Track CS2 knife prices from BUFF163, store historical snapshots in SQLite, Google Sheets, or PostgreSQL, and view market movement in a Streamlit dashboard.
 
 The project has two user-facing entry points:
 
@@ -12,8 +12,8 @@ The project has two user-facing entry points:
 ## Features
 
 - Collects CS2 knife prices, listing counts, buy orders, reference prices, and image URLs.
-- Writes history to Google Sheets for scheduled production runs.
 - Supports SQLite for local/offline testing.
+- Supports PostgreSQL for AWS production on RDS.
 - Uses optional CSGO Trader fallback data when BUFF direct collection is unavailable.
 - Merges direct, fallback, and full-catalog snapshots without losing listing depth.
 - Builds catalog, history, dashboard, signal, and optional forecast sheets.
@@ -117,8 +117,7 @@ SQLite mode is useful when you want to test locally without Google Sheets creden
 Run the tracker without writing to Google Sheets:
 
 ```powershell
-$env:BUFF_WRITE_SQLITE = "1"
-$env:BUFF_WRITE_SHEETS = "0"
+$env:STORAGE_BACKEND = "sqlite"
 $env:BUFF_SQLITE_PATH = "buff163.sqlite3"
 python main.py
 ```
@@ -126,8 +125,7 @@ python main.py
 Run a no-network smoke test:
 
 ```powershell
-$env:BUFF_WRITE_SQLITE = "1"
-$env:BUFF_WRITE_SHEETS = "0"
+$env:STORAGE_BACKEND = "sqlite"
 $env:BUFF_SKIP_DIRECT = "1"
 $env:BUFF_FALLBACK_CSGOTRADER = "0"
 $env:BUFF_FULL_CATALOG = "0"
@@ -137,10 +135,16 @@ python main.py
 Read SQLite data in the dashboard:
 
 ```powershell
-$env:BUFF_READ_SQLITE = "1"
+$env:STORAGE_BACKEND = "sqlite"
 $env:BUFF_SQLITE_PATH = "buff163.sqlite3"
 streamlit run app.py
 ```
+
+## AWS Production Deployment
+
+AWS production uses App Runner for the Streamlit dashboard, Lambda plus EventBridge Scheduler for the scraper, RDS PostgreSQL for storage, Secrets Manager for `DATABASE_URL` and optional `BUFF_COOKIE`, CloudWatch Logs, and Terraform in `infra/aws/`.
+
+Start with [DEPLOYMENT_AWS.md](DEPLOYMENT_AWS.md). The repo is prepared so you add AWS credentials and secret values locally, then run the documented Terraform and Docker commands.
 
 ## Google Sheets Setup
 
@@ -176,11 +180,16 @@ $env:BUFF_SHEET_NAME = "YourSheetName"
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
+| `STORAGE_BACKEND` | Storage backend: `sqlite`, `postgres`, or `sheets` | `sheets` if unset; `.env.example` uses `sqlite` |
+| `DATABASE_URL` | PostgreSQL DSN when `STORAGE_BACKEND=postgres` | none |
+| `DATABASE_URL_SECRET_ARN` | AWS Secrets Manager ARN for `DATABASE_URL` | none |
+| `BUFF_AUTO_MIGRATE_POSTGRES` | Apply pending PostgreSQL migrations on backend startup | `1` in `.env.example` and Terraform |
 | `BUFF_SHEET_NAME` | Google Sheet name or URL | `BuffKnifeTracker` |
 | `GSHEET_CREDS_JSON` | Google service account JSON | none |
 | `GSHEET_CREDS` | Legacy Google service account JSON fallback | none |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Path to local credential file | `credentials.json` fallback |
 | `BUFF_COOKIE` | Optional BUFF browser cookie | none |
+| `BUFF_COOKIE_SECRET_ARN` | AWS Secrets Manager ARN for `BUFF_COOKIE` | none |
 | `BUFF_MIN_PRICE_CNY` | Minimum tracked price | `0` |
 | `BUFF_HIGH_VALUE_PAGES` | BUFF market pages scanned per keyword | `25` locally, `2` in GitHub Actions |
 | `BUFF_TRACK_KEYWORDS` | Comma-separated knife keywords | all supported knife types |

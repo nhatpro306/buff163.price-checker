@@ -2,17 +2,35 @@
 # Do NOT put secret VALUES here — only ARNs of secrets created separately.
 
 aws_region           = "ap-southeast-1"
+project              = "buff163"
 ecr_repo_name        = "buff163-scraper"
+dashboard_ecr_repo_name = "buff163-dashboard"
 image_tag            = "latest"
+dashboard_image_tag  = "latest"
 lambda_function_name = "buff163-scraper"
 lambda_memory_mb     = 1024
 lambda_timeout_seconds = 900
+
+dashboard_service_name = "buff163-dashboard"
+dashboard_cpu          = "0.25 vCPU"
+dashboard_memory       = "0.5 GB"
 
 schedule_expression = "rate(12 hours)"
 schedule_enabled    = true
 log_retention_days  = 30
 
+db_name                  = "buff163"
+db_username              = "buff163_admin"
+db_instance_class        = "db.t4g.micro"
+db_allocated_storage_gb  = 20
+db_backup_retention_days = 7
+db_deletion_protection   = true
+db_skip_final_snapshot   = false
+
 # ARNs of secrets you created in Secrets Manager (values never in TF state).
+# If these are left blank, Terraform creates placeholder Secrets Manager
+# secrets named buff163/DATABASE_URL and buff163/BUFF_COOKIE. Add values with
+# aws secretsmanager put-secret-value after RDS exists.
 # database_url_secret_arn = "arn:aws:secretsmanager:ap-southeast-1:<acct>:secret:buff163/DATABASE_URL-xxxxxx"
 # buff_cookie_secret_arn  = "arn:aws:secretsmanager:ap-southeast-1:<acct>:secret:buff163/BUFF_COOKIE-xxxxxx"
 # secret_arns = [

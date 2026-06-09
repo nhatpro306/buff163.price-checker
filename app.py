@@ -48,15 +48,35 @@ from src.dashboard.sections import (
     render_top_movers,
 )
 from src.dashboard.theme import inject_styles
+from src.secrets import hydrate_secrets
+from src.storage.factory import get_storage_backend
 
 configure_page()
 inject_styles()
 
+storage_backend = os.getenv("STORAGE_BACKEND", "sheets").strip().lower()
 sqlite_path = os.getenv("BUFF_SQLITE_PATH", "").strip()
-use_sqlite = os.getenv("BUFF_READ_SQLITE", "").strip().lower() in {"1", "true", "yes", "on"}
+use_sqlite = storage_backend == "sqlite" or os.getenv("BUFF_READ_SQLITE", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+
+
+def load_configured_storage_history() -> pd.DataFrame:
+    if storage_backend == "postgres":
+        hydrate_secrets(("DATABASE_URL",))
+    backend = get_storage_backend()
+    return backend.load_history_frame()
+
+
+print(f"Dashboard startup: storage_backend={storage_backend}")
 history_df, catalog_df, all_catalog_df, forecast_df, startup_error = load_app_frames(
+    storage_backend=storage_backend,
     use_sqlite=use_sqlite,
     sqlite_path=sqlite_path,
+    load_backend_history=load_configured_storage_history,
     load_sqlite_history=sqlite_load_history_frame,
     load_sheet_history=load_history_records,
     load_sheet_records=load_sheet_records,
@@ -68,7 +88,7 @@ debug_log(
     "ui loaded "
     f"history_rows={len(history_df)} catalog_rows={len(catalog_df)} "
     f"all_catalog_rows={len(all_catalog_df)} forecast_rows={len(forecast_df)} "
-    f"source={'sqlite' if use_sqlite and sqlite_path else 'sheets'}"
+    f"source={storage_backend if storage_backend in {'postgres', 'sqlite'} else ('sqlite' if use_sqlite and sqlite_path else 'sheets')}"
 )
 
 if startup_error is not None:
@@ -79,7 +99,8 @@ if startup_error is not None:
         st.error("Cannot load data source. Check Google Sheet credentials or enable SQLite mode.")
         st.code(str(startup_error))
         st.info(
-            "Set `GSHEET_CREDS_JSON`/`credentials.json`, or set `BUFF_READ_SQLITE=1` with `BUFF_SQLITE_PATH`."
+            "Set `STORAGE_BACKEND=postgres` with `DATABASE_URL`, `STORAGE_BACKEND=sqlite` with "
+            "`BUFF_SQLITE_PATH`, or configure Google Sheets credentials."
         )
         st.code(f"Fallback failed: {fallback_error}")
         st.stop()

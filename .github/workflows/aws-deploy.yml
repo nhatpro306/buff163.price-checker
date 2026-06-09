@@ -1,0 +1,125 @@
+name: Deploy AWS Scraper Manually
+
+# Manual-only. Does NOT trigger on push.
+# Uses GitHub OIDC to assume an AWS role; no long-lived AWS_ACCESS_KEY_ID
+# secrets are needed in the repo.
+#
+# Prerequisites (one-time setup):
+#   1. In AWS IAM, create an OIDC provider for token.actions.githubusercontent.com
+#      (audience: sts.amazonaws.com).
+#   2. Create an IAM role trusted by that provider, scoped to this repository:
+#      Condition:
+#        StringEquals:
+#          token.actions.githubusercontent.com:aud: sts.amazonaws.com
+#        StringLike:
+#          token.actions.githubusercontent.com:sub: "repo:nhatpro306/buff163.price-checker:*"
+#      Attach a policy that allows the Terraform operations needed (the
+#      free-tier stack: S3, Lambda, EventBridge Scheduler, CloudWatch Logs,
+#      SSM, IAM, CloudFront, Budgets). Start with a narrow policy; do NOT
+#      attach AdministratorAccess.
+#   3. Add the role ARN as a repo secret named `AWS_DEPLOY_ROLE_ARN`.
+#   4. Optionally add `BUDGET_ALERT_EMAIL` repo secret.
+#
+# Inputs:
+#   action: "plan" (default, safe) or "apply" (creates/updates infra) or
+#           "destroy" (tears it all down).
+#   confirm: must be the literal string "yes" for apply/destroy to run.
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "plan | apply | destroy"
+        required: true
+        default: "plan"
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+      confirm:
+        description: 'Type "yes" to confirm a real apply/destroy.'
+        required: false
+        default: "no"
+
+permissions:
+  id-token: write     # OIDC
+  contents: read
+
+concurrency:
+  group: aws-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ap-northeast-1
+      TF_IN_AUTOMATION: "true"
+
+    steps:
+      - name: Guard apply/destroy with confirm
+        if: ${{ github.event.inputs.action != 'plan' && github.event.inputs.confirm != 'yes' }}
+        run: |
+          echo "Refusing to run '${{ github.event.inputs.action }}' without confirm=yes."
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify identity (sanity check)
+        run: aws sts get-caller-identity
+
+      - name: Set up Python (for compileall sanity check)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Compileall Lambda sources
+        run: |
+          python -m compileall -q static_site_handler.py
+          python -m compileall -q src/aws_lambda
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.5"
+
+      - name: Terraform init
+        working-directory: infra/aws-free-tier
+        run: terraform init -input=false
+
+      - name: Terraform fmt + validate
+        working-directory: infra/aws-free-tier
+        run: |
+          terraform fmt -check -recursive
+          terraform validate
+
+      - name: Terraform plan
+        if: ${{ github.event.inputs.action == 'plan' }}
+        working-directory: infra/aws-free-tier
+        run: |
+          terraform plan -input=false -no-color \
+            -var="aws_region=${{ env.AWS_REGION }}" \
+            ${{ secrets.BUDGET_ALERT_EMAIL && format('-var="budget_alert_email={0}"', secrets.BUDGET_ALERT_EMAIL) || '' }}
+
+      - name: Terraform apply
+        if: ${{ github.event.inputs.action == 'apply' }}
+        working-directory: infra/aws-free-tier
+        run: |
+          terraform apply -auto-approve -input=false -no-color \
+            -var="aws_region=${{ env.AWS_REGION }}" \
+            ${{ secrets.BUDGET_ALERT_EMAIL && format('-var="budget_alert_email={0}"', secrets.BUDGET_ALERT_EMAIL) || '' }}
+
+      - name: Terraform destroy
+        if: ${{ github.event.inputs.action == 'destroy' }}
+        working-directory: infra/aws-free-tier
+        run: |
+          terraform destroy -auto-approve -input=false -no-color \
+            -var="aws_region=${{ env.AWS_REGION }}"
