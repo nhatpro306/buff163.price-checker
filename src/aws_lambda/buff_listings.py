@@ -161,16 +161,28 @@ def build_price_history(
     cookie: str,
     goods_ids: list[int],
     *,
-    days: int = 365,
-    sleep_seconds: float = 1.2,
+    days: int = 180,
+    sleep_seconds: float = 0.8,
     timeout: int = 15,
+    max_consecutive_empty: int = 5,
 ) -> dict[str, list[list[float]]]:
-    """Fetch price history for several goods_ids. Keyed by str(goods_id)."""
+    """Fetch price history for several goods_ids. Keyed by str(goods_id).
+
+    Bails out early after ``max_consecutive_empty`` consecutive empty results,
+    which is the signal that BUFF is rate-limiting us. Stops eating Lambda
+    time on requests that aren't going to return data anyway.
+    """
     out: dict[str, list[list[float]]] = {}
+    empty_streak = 0
     for i, gid in enumerate(goods_ids):
         pts = fetch_price_history(cookie, gid, days=days, timeout=timeout)
         if pts:
             out[str(gid)] = pts
+            empty_streak = 0
+        else:
+            empty_streak += 1
+            if empty_streak >= max_consecutive_empty:
+                break
         if i + 1 < len(goods_ids):
             time.sleep(sleep_seconds)
     return out

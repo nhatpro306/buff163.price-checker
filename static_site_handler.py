@@ -1809,8 +1809,8 @@ def _enrich_listings(
 
         # Price history for the top enriched items (those with a buff goods_id).
         if s3_client and bucket:
-            history_n = int(os.getenv("LISTING_HISTORY_N", "60"))
-            history_days = int(os.getenv("HISTORY_DAYS", "365"))
+            history_n = int(os.getenv("LISTING_HISTORY_N", "25"))
+            history_days = int(os.getenv("HISTORY_DAYS", "180"))
             enriched = [r for r in rows if r.get("buff_url") and r.get("listing_count") is not None]
             enriched.sort(key=lambda r: (r.get("price_cny") or 0), reverse=True)
             goods_ids: list[int] = []
