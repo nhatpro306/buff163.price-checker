@@ -65,6 +65,13 @@ def test_static_site_handler_writes_html_and_json(monkeypatch):
     assert b"relatedItems" in html_body
     assert b"Selected item price history" in html_body
     assert b"renderTimeSeries" in html_body
+    assert b"current/listing_history.json" in html_body
+    assert b"Sell count" in html_body
+    assert b"listingHistory" in html_body
+    assert b"On sale" in html_body  # family cards supply stat
+    assert b"Most on sale (supply pressure)" in html_body
+    assert b"Scarcest supply" in html_body
+    assert b"family view" in html_body  # scatter scoped to selected family
     assert b"selectedFamilyRows" in html_body
     assert b"selected-row" in html_body
     assert b"FALLBACK_IMG" in html_body
@@ -108,6 +115,90 @@ def test_static_site_handler_filters_bad_prices_and_validates_fallbacks(monkeypa
     assert '<tbody id="rows"><tr' in html_body
     assert "selectedFamilyRows" in html_body
     static_site_handler._validate_static_payload(rows, html_body)
+
+
+class _HistoryS3:
+    """get_object/put_object pair backed by an in-memory dict of bodies."""
+
+    def __init__(self):
+        self.bodies: dict[str, bytes] = {}
+        self.put_count = 0
+
+    def get_object(self, Bucket, Key):
+        if Key not in self.bodies:
+            raise Exception("NoSuchKey")
+        import io
+
+        return {"Body": io.BytesIO(self.bodies[Key])}
+
+    def put_object(self, **kwargs):
+        self.bodies[kwargs["Key"]] = kwargs["Body"]
+        self.put_count += 1
+        return {}
+
+
+def _history_rows():
+    return [
+        {"buff_url": "https://buff.163.com/goods/42587", "listing_count": 251},
+        {"buff_url": "https://buff.163.com/goods/776", "listing_count": 88},
+        {"buff_url": None, "listing_count": 10},  # no goods_id -> skipped
+        {"buff_url": "https://buff.163.com/goods/999", "listing_count": None},  # unknown -> skipped
+    ]
+
+
+def test_append_listing_history_first_run_writes_one_point_per_item():
+    import json
+
+    s3 = _HistoryS3()
+    static_site_handler._append_listing_history(s3, "bucket", "", _history_rows())
+
+    assert s3.put_count == 1
+    data = json.loads(s3.bodies["current/listing_history.json"])
+    assert set(data) == {"42587", "776"}
+    assert len(data["42587"]) == 1
+    assert data["42587"][0][1] == 251
+    assert data["776"][0][1] == 88
+
+
+def test_append_listing_history_same_day_rerun_refreshes_not_duplicates():
+    import json
+
+    s3 = _HistoryS3()
+    static_site_handler._append_listing_history(s3, "bucket", "", _history_rows())
+    rows = _history_rows()
+    rows[0]["listing_count"] = 240  # count moved later same day
+    static_site_handler._append_listing_history(s3, "bucket", "", rows)
+
+    data = json.loads(s3.bodies["current/listing_history.json"])
+    assert len(data["42587"]) == 1  # same UTC day -> point replaced, not appended
+    assert data["42587"][0][1] == 240
+
+
+def test_append_listing_history_appends_new_day_and_caps_length():
+    import json
+
+    s3 = _HistoryS3()
+    # Pre-seed: 400 old points ending well in the past for one item.
+    old_ms = 1700000000000
+    seeded = {"42587": [[old_ms + i * 86400000, 100 + i] for i in range(400)]}
+    s3.bodies["current/listing_history.json"] = json.dumps(seeded).encode("utf-8")
+
+    static_site_handler._append_listing_history(
+        s3, "bucket", "", [{"buff_url": "https://buff.163.com/goods/42587", "listing_count": 251}]
+    )
+
+    data = json.loads(s3.bodies["current/listing_history.json"])
+    points = data["42587"]
+    assert len(points) == 400  # capped: oldest dropped
+    assert points[-1][1] == 251  # today appended last
+
+
+def test_append_listing_history_no_enriched_rows_writes_nothing():
+    s3 = _HistoryS3()
+    static_site_handler._append_listing_history(
+        s3, "bucket", "", [{"buff_url": None, "listing_count": None}]
+    )
+    assert s3.put_count == 0
 
 
 def test_static_site_handler_keeps_m9_bayonet_separate(monkeypatch):

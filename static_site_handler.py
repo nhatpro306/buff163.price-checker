@@ -1247,6 +1247,7 @@ let selectedRow = [...rows].sort((a,b) => rowPrice(b) - rowPrice(a))[0] || rows[
 let selectedFamily = "";
 let rangeDays = 90;
 let priceHistory = {};
+let listingHistory = {};
 const wearOrder = ["FN", "MW", "FT", "WW", "BS"];
 function goodsIdOf(row) {
   const u = row && row.buff_url;
@@ -1263,6 +1264,12 @@ function goodsIdOf(row) {
 fetch("current/price_history.json", {cache: "no-store"})
   .then(r => r.ok ? r.json() : {})
   .then(d => { priceHistory = d || {}; renderPriceChart(); })
+  .catch(() => {});
+// Sell-count history (self-accumulated daily by the Lambda — BUFF has no
+// historical sell_num API, so the green line grows one point per day).
+fetch("current/listing_history.json", {cache: "no-store"})
+  .then(r => r.ok ? r.json() : {})
+  .then(d => { listingHistory = d || {}; renderPriceChart(); })
   .catch(() => {});
 function money(value) { return value == null ? "N/A" : Number(value).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) + " CNY"; }
 function escapeHtml(value) {
@@ -1369,7 +1376,8 @@ function renderWearLadder() {
     const p = rowPrice(m);
     const pct = Math.max((p / max) * 100, 3);
     const active = selectedRow.wear === w ? " active" : "";
-    return `<div class="wl-row${active}" data-id="${escapeHtml(m.goods_id)}" style="cursor:pointer"><span class="wl-wear">${w}</span><div class="wl-bar"><i style="width:${pct}%"></i></div><span class="wl-price">${money(p)}</span></div>`;
+    const sell = listingValue(m) !== null ? `<span style="color:#56d89a;font-size:11px;white-space:nowrap">Sell ${listingText(m)}</span>` : "";
+    return `<div class="wl-row${active}" data-id="${escapeHtml(m.goods_id)}" style="cursor:pointer"><span class="wl-wear">${w}</span><div class="wl-bar"><i style="width:${pct}%"></i></div><span class="wl-price">${money(p)}</span>${sell}</div>`;
   }).join("");
   wearLadder.querySelectorAll(".wl-row[data-id]").forEach(el => {
     el.addEventListener("click", () => {
@@ -1491,8 +1499,9 @@ function seriesPair(gid) {
   // there's no usable data for the goods_id.
   const raw = gid ? priceHistory[gid] : null;
   if (!raw) return null;
-  if (Array.isArray(raw)) return { listing: raw, buy_order: [] };
-  return { listing: raw.listing || [], buy_order: raw.buy_order || [] };
+  const sell = (gid && listingHistory[gid]) || [];
+  if (Array.isArray(raw)) return { listing: raw, buy_order: [], sell };
+  return { listing: raw.listing || [], buy_order: raw.buy_order || [], sell };
 }
 function renderPriceChart() {
   const host = document.getElementById("priceChart");
@@ -1551,11 +1560,14 @@ function _filterRange(arr) {
   return s;
 }
 function renderTimeSeries(host, pair) {
-  // Back-compat: accept either {listing,buy_order} or a bare array.
-  if (Array.isArray(pair)) pair = { listing: pair, buy_order: [] };
+  // Back-compat: accept either {listing,buy_order[,sell]} or a bare array.
+  if (Array.isArray(pair)) pair = { listing: pair, buy_order: [], sell: [] };
   const series = _filterRange(pair.listing || []);
   const buy = _filterRange(pair.buy_order || []);
-  const w = 900, h = 280, padL = 60, padR = 16, padT = 16, padB = 26;
+  const sellRaw = pair.sell || [];
+  const sell = sellRaw.length ? _filterRange(sellRaw) : [];
+  const hasSell = sell.length >= 2; // need 2+ daily points to draw a line
+  const w = 900, h = 280, padL = 60, padR = hasSell ? 56 : 16, padT = 16, padB = 26;
   // X domain spans both series so they share the same axis.
   const xs = series.map(p => p[0]).concat(buy.map(p => p[0]));
   const ys = series.map(p => p[1]).concat(buy.map(p => p[1]));
@@ -1566,6 +1578,19 @@ function renderTimeSeries(host, pair) {
   const linePts = series.map(p => `${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(" ");
   const areaPts = `${padL},${h-padB} ${linePts} ${(w-padR)},${h-padB}`;
   const buyPts = buy.length ? buy.map(p => `${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(" ") : "";
+  // Sell-count series uses its own right-hand axis (counts, not CNY).
+  let sellPts = "", sellAxis = "";
+  let Y2 = null;
+  if (hasSell) {
+    const sellYs = sell.map(p => p[1]);
+    const minS = Math.min(...sellYs), maxS = Math.max(...sellYs);
+    Y2 = v => h - padB - ((v - minS) / Math.max(maxS - minS, 1)) * (h - padT - padB);
+    sellPts = sell.map(p => `${X(p[0]).toFixed(1)},${Y2(p[1]).toFixed(1)}`).join(" ");
+    for (let i = 0; i <= 4; i++) {
+      const val = minS + (maxS - minS) * (i / 4);
+      sellAxis += `<text class="ph-axis" x="${w - padR + 6}" y="${Y2(val)+4}" fill="#56d89a">${Math.round(val).toLocaleString()}</text>`;
+    }
+  }
   // horizontal gridlines + y labels (4 ticks)
   let grid = "";
   for (let i = 0; i <= 4; i++) {
@@ -1585,10 +1610,16 @@ function renderTimeSeries(host, pair) {
   const buyLine = buyPts
     ? `<polyline points="${buyPts}" fill="none" stroke="#facc15" stroke-width="1.5" opacity="0.85"></polyline>`
     : "";
+  // Green "how many left on sale" line — BUFF's Total Supply equivalent,
+  // built from our own daily sell_num snapshots.
+  const sellLine = sellPts
+    ? `<polyline points="${sellPts}" fill="none" stroke="#56d89a" stroke-width="2" opacity="0.9"></polyline>`
+    : "";
   const legend = `
     <div style="position:absolute;top:6px;right:10px;display:flex;gap:14px;font-size:12px;color:var(--muted);background:rgba(7,10,16,.6);padding:4px 10px;border-radius:8px;border:1px solid var(--line)">
       <span style="display:inline-flex;align-items:center;gap:5px"><span style="width:14px;height:2px;background:linear-gradient(90deg,#f5b342,#ff7a1a)"></span>Listing price</span>
       ${buyPts ? '<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:14px;height:2px;background:#facc15"></span>Transactions</span>' : ""}
+      ${sellPts ? '<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:14px;height:2px;background:#56d89a"></span>Sell count</span>' : ""}
     </div>`;
   host.innerHTML = `
     <div style="position:relative;width:100%;height:100%">
@@ -1599,8 +1630,10 @@ function renderTimeSeries(host, pair) {
           <linearGradient id="phArea" x1="0" x2="0" y1="0" y2="1"><stop stop-color="#f5b342" stop-opacity=".30"/><stop offset="1" stop-color="#f5b342" stop-opacity="0"/></linearGradient>
         </defs>
         ${grid}
+        ${sellAxis}
         <polygon class="ph-area" points="${areaPts}"></polygon>
         ${buyLine}
+        ${sellLine}
         <polyline class="ph-line" points="${linePts}"></polyline>
         <line class="ph-crosshair" id="phCross" y1="${padT}" y2="${h-padB}"></line>
         <circle class="ph-dot" id="phDot" r="3.5"></circle>
@@ -1612,6 +1645,13 @@ function renderTimeSeries(host, pair) {
     const first = series[0], last = series[series.length-1];
     const chg = first[1] ? ((last[1]-first[1])/first[1]*100) : 0;
     priceChartMeta.innerHTML = `<span>${_fmtDate(minX)} → ${_fmtDate(maxX)} &middot; ${series.length} points</span><span>Range ${money(minY)} – ${money(maxY)} &middot; <b style="color:${chg>=0?'var(--green)':'var(--red)'}">${chg>=0?'+':''}${chg.toFixed(1)}%</b></span>`;
+    if (hasSell) {
+      const sFirst = sell[0][1], sLast = sell[sell.length-1][1];
+      const sDelta = sLast - sFirst;
+      priceChartMeta.innerHTML += `<span style="color:#56d89a">Sell count ${sFirst.toLocaleString()} → ${sLast.toLocaleString()} (${sDelta>=0?'+':''}${sDelta.toLocaleString()} left on sale)</span>`;
+    } else if (sellRaw.length === 1) {
+      priceChartMeta.innerHTML += `<span class="muted">Sell-count tracking started — ${sellRaw[0][1].toLocaleString()} on sale today. Green line appears after 2+ daily snapshots.</span>`;
+    }
   }
   // hover tooltip
   const svg = host.querySelector(".ph-svg");
@@ -1637,7 +1677,11 @@ function renderTimeSeries(host, pair) {
     const buyLineHtml = buyBest
       ? `<br><span style="color:#facc15">Transaction ${money(buyBest[1])}</span>`
       : "";
-    tip.innerHTML = `<b>Listing ${money(listingBest[1])}</b>${buyLineHtml}<br><span class="muted">${_fmtDate(listingBest[0])}</span>`;
+    const sellBest = hasSell ? _nearest(sell, px) : null;
+    const sellLineHtml = sellBest
+      ? `<br><span style="color:#56d89a">On sale: ${sellBest[1].toLocaleString()}</span>`
+      : "";
+    tip.innerHTML = `<b>Listing ${money(listingBest[1])}</b>${buyLineHtml}${sellLineHtml}<br><span class="muted">${_fmtDate(listingBest[0])}</span>`;
   }
   function onLeave() { cross.style.opacity = 0; dot.style.opacity = 0; tip.style.opacity = 0; }
   svg.addEventListener("mousemove", onMove);
@@ -1728,6 +1772,9 @@ function renderFamilyCards() {
     const avg = prices.length ? prices.reduce((s,p)=>s+p,0)/prices.length : 0;
     const mn = prices.length ? Math.min(...prices) : 0;
     const mx = prices.length ? Math.max(...prices) : 0;
+    // Family supply: sum of known BUFF Sell(N) counts. N/A until enriched.
+    const listed = f.items.filter(r => listingValue(r) !== null);
+    const sellTotal = listed.reduce((s,r) => s + listingValue(r), 0);
     const img = imageByKnife[f.name] || (f.items.find(r => r.image_url)?.image_url) || "";
     return `<button class="fam-card" type="button" data-knife="${escapeHtml(f.name)}">
       <div class="fam-head"><img src="${escapeHtml(img || FALLBACK_IMG)}" alt="" loading="lazy" onerror="imgFallback(this)"><strong>${escapeHtml(f.name)}</strong></div>
@@ -1736,6 +1783,7 @@ function renderFamilyCards() {
         <span>Avg <strong>${money(avg)}</strong></span>
         <span>Min <strong>${money(mn)}</strong></span>
         <span>Max <strong>${money(mx)}</strong></span>
+        <span>On sale <strong style="color:${listed.length ? '#56d89a' : 'inherit'}">${listed.length ? sellTotal.toLocaleString() : "N/A"}</strong></span>
       </div>
     </button>`;
   }).join("");
@@ -1763,12 +1811,21 @@ function renderMarketSignals() {
     </button>`;
   }
 
-  host.innerHTML = [
+  // Listing-driven signals: deepest supply (price pressure) vs scarcest
+  // (low supply supports price). Only render when BUFF Sell(N) data exists.
+  const withListings = rows.filter(r => listingValue(r) !== null && listingValue(r) > 0);
+  const mostListed = [...withListings].sort((a,b) => listingValue(b) - listingValue(a))[0];
+  const scarcest = [...withListings].sort((a,b) => listingValue(a) - listingValue(b))[0];
+
+  const cards = [
     card("Highest tracked price", top, top ? `${top.knife_type} / ${top.wear}` : ""),
     card("Cheapest valid item", cheap, cheap ? `${cheap.knife_type} / ${cheap.wear}` : ""),
     card("Biggest spread vs reference", biggestSpread, biggestSpread ? `${biggestSpread.knife_type} / ${biggestSpread.wear}` : ""),
     card("Tightest spread", tightestSpread, tightestSpread ? `${tightestSpread.knife_type} / ${tightestSpread.wear}` : ""),
-  ].join("");
+  ];
+  if (mostListed) cards.push(card("Most on sale (supply pressure)", mostListed, `Sell ${listingText(mostListed)} · ${mostListed.knife_type} / ${mostListed.wear}`));
+  if (scarcest && scarcest !== mostListed) cards.push(card("Scarcest supply", scarcest, `Sell ${listingText(scarcest)} · ${scarcest.knife_type} / ${scarcest.wear}`));
+  host.innerHTML = cards.join("");
   host.querySelectorAll("button.lm-card").forEach(btn => {
     btn.addEventListener("click", () => {
       const m = rows.find(r => r.goods_id === btn.dataset.id);
@@ -1781,8 +1838,14 @@ function renderSupplyChart() {
   const badge = document.getElementById("supplyBadge");
   const meta = document.getElementById("supplyMeta");
   if (!host) return;
-  const enriched = rows.filter(r => listingValue(r) !== null && listingValue(r) > 0 && rowPrice(r) > 0);
-  badge.textContent = `${enriched.length.toLocaleString()} items`;
+  const all = rows.filter(r => listingValue(r) !== null && listingValue(r) > 0 && rowPrice(r) > 0);
+  // Scope to the selected family when it has enough listing data — answers
+  // "how does supply move price for THIS knife" instead of the global cloud.
+  const famFilter = knifeType.value;
+  const famSubset = famFilter ? all.filter(r => r.knife_type === famFilter) : all;
+  const scoped = !!famFilter && famSubset.length >= 3;
+  const enriched = scoped ? famSubset : all;
+  badge.textContent = `${enriched.length.toLocaleString()} items${scoped ? " · " + famFilter : " · all knives"}`;
   if (enriched.length < 3) {
     host.innerHTML = `<div class="empty-state"><div><strong>Not enough listing data yet</strong><p>Once BUFF Sell(N) counts are fetched for more items, this chart shows how supply relates to price across all listed knives.</p></div></div>`;
     if (meta) meta.textContent = "";
@@ -1845,7 +1908,7 @@ function renderSupplyChart() {
     </div>`;
   // Legend in meta
   const legendHtml = families.map(f => `<span style="display:inline-flex;align-items:center;gap:4px;margin-right:10px"><span style="width:8px;height:8px;border-radius:999px;background:${colorOf(f)}"></span>${escapeHtml(f)}</span>`).join("");
-  if (meta) meta.innerHTML = `<span><b style="color:${slope>=0?'var(--green)':'var(--red)'}">${corr} correlation</b> &middot; slope ${slope.toFixed(2)} &middot; R²=${r2.toFixed(2)}</span><span>${legendHtml}</span>`;
+  if (meta) meta.innerHTML = `<span>${scoped ? `<b>${escapeHtml(famFilter)}</b> &middot; ` : ""}<b style="color:${slope>=0?'var(--green)':'var(--red)'}">${corr} correlation</b> &middot; slope ${slope.toFixed(2)} &middot; R²=${r2.toFixed(2)}${scoped ? ` &middot; <span style="color:var(--muted)">family view — select All knives for global</span>` : ""}</span><span>${legendHtml}</span>`;
   // Hover tooltip
   const svg = host.querySelector("svg");
   const tip = host.querySelector("#supplyTip");
@@ -1996,6 +2059,64 @@ def _alert_cookie_expired(ssm_client: Any, fetch_errors: list[str]) -> None:
     )
 
 
+def _append_listing_history(
+    s3_client: Any, bucket: str, key_prefix: str, rows: list[dict[str, Any]]
+) -> None:
+    """Self-accumulated sell-count time series (BUFF "Total Supply" line).
+
+    BUFF exposes no historical sell_num endpoint, so each daily run appends the
+    current listing_count per goods_id to ``current/listing_history.json``:
+    ``{goods_id: [[epoch_ms, count], ...]}``. One point per UTC day per item —
+    a re-run on the same day refreshes that day's point instead of duplicating
+    it. Capped at 400 points per item to bound the object size.
+    """
+    if not s3_client or not bucket:
+        return
+    key = f"{key_prefix}current/listing_history.json"
+    history: dict[str, list[list[int]]] = {}
+    try:
+        obj = s3_client.get_object(Bucket=bucket, Key=key)
+        existing = json.loads(obj["Body"].read().decode("utf-8"))
+        if isinstance(existing, dict):
+            history = {k: v for k, v in existing.items() if isinstance(v, list)}
+    except Exception:  # noqa: BLE001 - first run: object does not exist yet
+        history = {}
+
+    now = datetime.now(UTC)
+    today = now.strftime("%Y-%m-%d")
+    now_ms = int(now.timestamp() * 1000)
+    appended = 0
+    for row in rows:
+        if row.get("listing_count") is None or not row.get("buff_url"):
+            continue
+        try:
+            gid = str(int(str(row["buff_url"]).rsplit("/", 1)[-1]))
+            count = int(row["listing_count"])
+        except (TypeError, ValueError):
+            continue
+        points = history.setdefault(gid, [])
+        last_day = ""
+        if points:
+            try:
+                last_day = datetime.fromtimestamp(points[-1][0] / 1000, UTC).strftime("%Y-%m-%d")
+            except (TypeError, ValueError, IndexError):
+                last_day = ""
+        if last_day == today:
+            points[-1] = [now_ms, count]
+        else:
+            points.append([now_ms, count])
+            appended += 1
+        if len(points) > 400:
+            del points[: len(points) - 400]
+
+    if not history:
+        return
+    from src.aws_lambda.s3_store import put_json  # noqa: PLC0415
+
+    put_json(s3_client, bucket, key, history, dedupe=False)
+    print(f"listing_history_items={len(history)} appended={appended}", flush=True)
+
+
 def _enrich_listings(
     ssm_client: Any,
     rows: list[dict[str, Any]],
@@ -2065,6 +2186,16 @@ def _enrich_listings(
 
                     put_json(s3_client, bucket, f"{key_prefix}current/price_history.json", history)
                     print(f"price_history_items={len(history)}", flush=True)
+
+        # ----- Listing count history (self-accumulated) ------------------
+        # BUFF's "Total Supply" green line. We don't have a historical endpoint
+        # for sell_num, so each daily run appends the current listing_count for
+        # every enriched item to an S3-backed time series. After ~30 days the
+        # chart fills with a real green line.
+        try:
+            _append_listing_history(s3_client, bucket, key_prefix, rows)
+        except Exception as exc:  # noqa: BLE001 - best effort
+            errors.append(f"listing_history_append_failed: {type(exc).__name__}")
     except Exception as exc:  # noqa: BLE001 - enrichment is best-effort
         errors.append(f"listing_enrich_failed: {type(exc).__name__}")
 
