@@ -84,6 +84,16 @@ The project has two user-facing entry points:
 
 ## Quick Start
 
+Use Python 3.11 (the version used by the lint/test workflow), Git and an isolated environment.
+
+```powershell
+git clone https://github.com/nhatpro306/buff163.price-checker.git
+cd buff163.price-checker
+Copy-Item .env.example .env
+```
+
+[`.env.example`](.env.example) is a configuration reference. Native tracker/dashboard processes read environment variables; copying it does not automatically export those values. Set the required `$env:...` variables in your shell as shown below, or pass `.env` through Docker's `--env-file` option.
+
 Create and activate a virtual environment:
 
 ```powershell
@@ -98,9 +108,10 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-Run the tracker:
+Run the tracker with local SQLite storage (no Google credentials required; collection still makes network requests):
 
 ```powershell
+$env:STORAGE_BACKEND = "sqlite"
 python main.py
 ```
 
@@ -122,7 +133,7 @@ $env:BUFF_SQLITE_PATH = "buff163.sqlite3"
 python main.py
 ```
 
-Run a no-network smoke test:
+Run a smoke test with direct collection, fallback collection and full-catalog collection disabled:
 
 ```powershell
 $env:STORAGE_BACKEND = "sqlite"
@@ -344,8 +355,15 @@ Important concepts in this project:
 
 ## Roadmap Ideas
 
-- Add `.env.example` for easier local onboarding.
+- Expand the existing [`.env.example`](.env.example) when new configuration options are introduced.
 - Add screenshots of the Streamlit dashboard.
 - Add integration tests for SQLite tracker runs.
 - Improve dashboard error messages for missing credentials or sheet permissions.
 - Add richer alert rules and per-skin alert configuration.
+
+## Documentation and verification limits
+
+- [AWS deployment](DEPLOYMENT_AWS.md), [AWS free-tier notes](AWS_FREE_TIER.md) and [deployment planning](FREE_TIER_PLAN.md).
+- [`docs/`](docs/) contains additional architecture and operations notes; [`db/`](db/) contains database support files.
+- The commands above describe the repository's checks. A green test run does not verify live BUFF access, account cookies, Google permissions or AWS resources.
+- Market snapshots may come from direct collection or fallback sources. Confirm freshness and source before interpreting prices or signals.
